@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+/* ===== BridgeBooks Design System ===== */
+
+/* Custom Theme */
+@theme {
+  --color-primary: #1E3A5F;
+  --color-primary-light: #2B5A8F;
+  --color-primary-dark: #0F2440;
+  --color-accent: #F59E0B;
+  --color-accent-light: #FBBF24;
+  --color-accent-dark: #D97706;
+  --color-surface: #F8FAFC;
+  --color-surface-dark: #0F172A;
+  --color-surface-card: #FFFFFF;
+  --color-surface-card-dark: #1E293B;
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+  --color-text-inverse: #F8FAFC;
+  --color-border: #E2E8F0;
+  --color-border-dark: #334155;
+  --color-success: #10B981;
+  --color-error: #EF4444;
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* Base Resets */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Link resets */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Focus ring utility */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
