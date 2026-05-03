@@ -1,17 +1,52 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Navigate, useLocation } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import Button from '../components/Button'
+import Alert from '../components/Alert'
+import Spinner from '../components/Spinner'
 
+/**
+ * Login — Authentication page for BridgeBooks.
+ *
+ * Features:
+ *   - Email + password form with validation
+ *   - Submits credentials via AuthContext.login()
+ *   - Shows inline error alerts on failure
+ *   - Displays a spinner while the request is in flight
+ *   - Redirects to Dashboard (or the originally requested page) on success
+ *   - Automatically redirects to Dashboard if already authenticated
+ */
 function Login() {
+  const { login, isAuthenticated, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
 
-  const handleLogin = (e) => {
+  // If the user is already logged in, redirect away from the login page.
+  if (!authLoading && isAuthenticated) {
+    const destination = location.state?.from?.pathname || '/dashboard'
+    return <Navigate to={destination} replace />
+  }
+
+  const handleLogin = async (e) => {
     e.preventDefault()
-    // TODO: Replace with real authentication via services/api.js
-    console.log('Login attempt:', { email })
-    navigate('/dashboard')
+    setError(null)
+    setSubmitting(true)
+
+    try {
+      await login(email, password)
+      // Redirect to the page the user originally wanted, or default to /dashboard.
+      const destination = location.state?.from?.pathname || '/dashboard'
+      navigate(destination, { replace: true })
+    } catch (err) {
+      setError(err.message || 'Login failed. Please check your credentials.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -27,6 +62,13 @@ function Login() {
             </p>
           </div>
 
+          {/* Error Alert */}
+          <Alert
+            variant="error"
+            message={error}
+            onDismiss={() => setError(null)}
+          />
+
           {/* Form */}
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-1.5">
@@ -37,10 +79,12 @@ function Login() {
                 id="login-email"
                 type="email"
                 required
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-all duration-200"
+                disabled={submitting}
+                className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-all duration-200 disabled:opacity-60"
               />
             </div>
 
@@ -52,17 +96,39 @@ function Login() {
                 id="login-password"
                 type="password"
                 required
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-all duration-200"
+                disabled={submitting}
+                className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-all duration-200 disabled:opacity-60"
               />
             </div>
 
-            <Button type="submit" variant="primary" size="lg" className="w-full">
-              Sign In
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              className="w-full"
+              disabled={submitting}
+            >
+              {submitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Spinner size="sm" />
+                  Signing in…
+                </span>
+              ) : (
+                'Sign In'
+              )}
             </Button>
           </form>
+
+          {/* Dev credentials hint */}
+          <div className="bg-primary/5 rounded-lg p-3 text-xs text-text-secondary space-y-1">
+            <p className="font-semibold text-primary-dark">Dev Credentials</p>
+            <p>Email: <code className="bg-white px-1 py-0.5 rounded text-primary font-mono">admin@bridgebooks.co.za</code></p>
+            <p>Password: <code className="bg-white px-1 py-0.5 rounded text-primary font-mono">bridge2026</code></p>
+          </div>
 
           {/* Footer */}
           <p className="text-center text-xs text-text-muted">

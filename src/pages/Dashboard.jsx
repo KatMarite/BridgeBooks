@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import Button from '../components/Button'
 
 const stats = [
@@ -17,6 +18,7 @@ const recentActivity = [
 
 function Dashboard() {
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
@@ -25,7 +27,7 @@ function Dashboard() {
         <div>
           <h1 className="text-3xl font-bold text-primary-dark">Dashboard</h1>
           <p className="text-text-secondary mt-1">
-            Welcome back! Here&apos;s what&apos;s happening in your library.
+            Welcome back{user?.name ? `, ${user.name}` : ''}! Here&apos;s what&apos;s happening in your library.
           </p>
         </div>
         <Button variant="secondary" onClick={() => navigate('/search')}>
