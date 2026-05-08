@@ -57,6 +57,28 @@ export async function fetchBooks(query = '') {
   return request(`/books${params}`)
 }
 
+export async function searchBooks({ q, field, timeoutMs = 15000 } = {}) {
+  const query = typeof q === 'string' ? q : ''
+  const params = new URLSearchParams()
+  if (query) params.set('q', query)
+  if (field) params.set('field', field)
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const qs = params.toString()
+    return await request(`/books${qs ? `?${qs}` : ''}`, { signal: controller.signal })
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      throw new Error('Request timed out')
+    }
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export async function fetchBookById(id) {
   return request(`/books/${id}`)
 }

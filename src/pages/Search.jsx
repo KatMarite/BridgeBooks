@@ -1,86 +1,211 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import Alert from '../components/Alert'
+import BookCard from '../components/BookCard'
+import BookResultsTable from '../components/BookResultsTable'
 import SearchBar from '../components/SearchBar'
+import Spinner from '../components/Spinner'
+import { searchBooks } from '../services/api'
 
-const sampleBooks = [
-  { id: 1, title: 'The Great Gatsby', author: 'F. Scott Fitzgerald', year: 1925, genre: 'Fiction', available: true },
-  { id: 2, title: 'To Kill a Mockingbird', author: 'Harper Lee', year: 1960, genre: 'Fiction', available: false },
-  { id: 3, title: '1984', author: 'George Orwell', year: 1949, genre: 'Dystopian', available: true },
-  { id: 4, title: 'Pride and Prejudice', author: 'Jane Austen', year: 1813, genre: 'Romance', available: true },
-  { id: 5, title: 'The Catcher in the Rye', author: 'J.D. Salinger', year: 1951, genre: 'Fiction', available: false },
-  { id: 6, title: 'Brave New World', author: 'Aldous Huxley', year: 1932, genre: 'Dystopian', available: true },
+const FILTER_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'isbn', label: 'ISBN' },
+  { value: 'title', label: 'Title' },
+  { value: 'author', label: 'Author' },
 ]
 
-function Search() {
-  const [results, setResults] = useState(sampleBooks)
-  const [searched, setSearched] = useState(false)
+function sanitizeQuery(raw, filter) {
+  const trimmed = (raw || '').trim()
+  if (filter === 'isbn') return trimmed.replaceAll('-', '').replaceAll(' ', '')
+  return trimmed
+}
 
-  const handleSearch = (query) => {
-    setSearched(true)
-    if (!query) {
-      setResults(sampleBooks)
+function normalizeSuppliers(raw) {
+  if (!raw) return {}
+
+  // Preferred shape: object keyed by supplier id/name
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw
+  }
+
+  // Alternate shape: array of { name, price, inStock, qty }
+  if (Array.isArray(raw)) {
+    const out = {}
+    for (const s of raw) {
+      const name = (s?.name || s?.supplier || '').toString().toLowerCase()
+      if (name.includes('booksite')) out.booksite = s
+      else if (name.includes('jonathan')) out.jonathanBall = s
+      else if (name.includes('protea')) out.protea = s
+    }
+    return out
+  }
+
+  return {}
+}
+
+function normalizeBook(raw) {
+  const coverImageUrl =
+    raw?.coverImageUrl ||
+    raw?.cover_url ||
+    raw?.coverUrl ||
+    raw?.imageUrl ||
+    raw?.thumbnailUrl ||
+    ''
+
+  const publicationDate =
+    raw?.publicationDate ||
+    raw?.publishedDate ||
+    raw?.publication_date ||
+    raw?.year ||
+    ''
+
+  return {
+    id: raw?.id || raw?._id || raw?.isbn || raw?.ISBN,
+    title: raw?.title || raw?.name || raw?.bookTitle || '',
+    author: raw?.author || raw?.authors || raw?.bookAuthor || '',
+    isbn: raw?.isbn || raw?.ISBN || raw?.isbn13 || raw?.isbn10 || '',
+    publicationDate: publicationDate ? String(publicationDate) : '',
+    coverImageUrl,
+    suppliers: normalizeSuppliers(raw?.suppliers || raw?.supplierPricing || raw?.supplierData),
+  }
+}
+
+function friendlyErrorMessage(err) {
+  // Fetch/network failures typically throw TypeError("Failed to fetch") in browsers.
+  const isNetworkError =
+    (err && err.name === 'TypeError') ||
+    ((err && typeof err.message === 'string') &&
+      err.message.toLowerCase().includes('failed to fetch'))
+
+  const msg = (err && typeof err.message === 'string' ? err.message : '').toLowerCase()
+  if (msg.includes('timeout') || msg.includes('timed out')) {
+    return 'Search is taking too long. Please try again.'
+  }
+  if (isNetworkError) {
+    return 'Unable to reach the server. Please check your connection and try again.'
+  }
+  return 'Something went wrong while searching. Please try again.'
+}
+
+function Search() {
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('all')
+  const [results, setResults] = useState([])
+  const [hasSearched, setHasSearched] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  const placeholder = useMemo(() => {
+    if (filter === 'isbn') return 'Search by ISBN…'
+    if (filter === 'title') return 'Search by title…'
+    if (filter === 'author') return 'Search by author…'
+    return 'Search by ISBN, title, or author…'
+  }, [filter])
+
+  const normalizedResults = useMemo(() => results.map(normalizeBook), [results])
+
+  const handleClear = () => {
+    setQuery('')
+    setFilter('all')
+    setResults([])
+    setHasSearched(false)
+    setErrorMessage('')
+  }
+
+  const handleSubmit = async () => {
+    setErrorMessage('')
+    const q = sanitizeQuery(query, filter)
+
+    if (!q) {
+      setResults([])
+      setHasSearched(false)
       return
     }
-    const q = query.toLowerCase()
-    setResults(
-      sampleBooks.filter(
-        (b) =>
-          b.title.toLowerCase().includes(q) ||
-          b.author.toLowerCase().includes(q) ||
-          b.genre.toLowerCase().includes(q)
-      )
-    )
+
+    setHasSearched(true)
+    setIsLoading(true)
+    try {
+      const data = await searchBooks({ q, field: filter === 'all' ? undefined : filter })
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : [])
+      setResults(list)
+    } catch (err) {
+      setResults([])
+      setErrorMessage(friendlyErrorMessage(err))
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-      {/* Page Header */}
       <div className="text-center space-y-3">
-        <h1 className="text-3xl font-bold text-primary-dark">Search Books</h1>
-        <p className="text-text-secondary max-w-md mx-auto">
-          Find any book in the BridgeBooks catalogue by title, author, or genre.
+        <h1 className="text-3xl font-bold text-primary-dark">Book Search</h1>
+        <p className="text-text-secondary max-w-xl mx-auto">
+          Enter an ISBN, title, or author to find books and supplier availability.
         </p>
       </div>
 
-      {/* Search Bar */}
-      <div className="flex justify-center">
-        <SearchBar onSearch={handleSearch} placeholder="Search by title, author, or genre…" />
-      </div>
-
-      {/* Results */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        {results.map((book) => (
-          <div
-            key={book.id}
-            className="bg-white rounded-2xl border border-border p-6 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
-          >
-            <div className="flex items-start justify-between mb-3">
-              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary/10 text-primary">
-                {book.genre}
-              </span>
-              <span
-                className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                  book.available
-                    ? 'bg-success/10 text-success'
-                    : 'bg-error/10 text-error'
-                }`}
-              >
-                {book.available ? 'Available' : 'Checked Out'}
-              </span>
-            </div>
-            <h3 className="text-lg font-bold text-primary-dark mb-1 leading-tight">
-              {book.title}
-            </h3>
-            <p className="text-sm text-text-secondary">{book.author}</p>
-            <p className="text-xs text-text-muted mt-1">Published {book.year}</p>
-          </div>
-        ))}
-      </div>
-
-      {searched && results.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-xl text-text-muted">No books found matching your search.</p>
+      <div className="space-y-3">
+        <div className="flex justify-center">
+          <SearchBar
+            value={query}
+            onChange={setQuery}
+            placeholder={placeholder}
+            onSubmit={handleSubmit}
+            onClear={handleClear}
+            filterValue={filter}
+            onFilterChange={setFilter}
+            filterOptions={FILTER_OPTIONS}
+          />
         </div>
-      )}
+
+        <div className="flex justify-center">
+          <div className="w-full max-w-3xl">
+            {isLoading && <Spinner size="sm" label="Searching…" className="py-2" />}
+            {!!errorMessage && (
+              <Alert
+                variant="error"
+                message={errorMessage}
+                onDismiss={() => setErrorMessage('')}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-6">
+        {!hasSearched && results.length === 0 && !isLoading && !errorMessage && (
+          <div className="text-center py-14 border border-border bg-white rounded-2xl">
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center text-2xl">
+              🔎
+            </div>
+            <p className="mt-4 text-lg font-semibold text-primary-dark">
+              Enter an ISBN, title, or author to begin searching
+            </p>
+            <p className="mt-1 text-sm text-text-secondary">
+              Tip: ISBN searches work best without spaces or hyphens.
+            </p>
+          </div>
+        )}
+
+        {hasSearched && !isLoading && !errorMessage && results.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-xl text-text-muted">
+              No books found matching ‘{sanitizeQuery(query, filter)}’. Check the details and try again.
+            </p>
+          </div>
+        )}
+
+        {!isLoading && !errorMessage && results.length > 0 && (
+          <>
+            <BookResultsTable books={normalizedResults} />
+            <div className="grid grid-cols-1 gap-4 md:hidden">
+              {normalizedResults.map((b, idx) => (
+                <BookCard key={b.id || b.isbn || idx} book={b} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
