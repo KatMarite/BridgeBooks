@@ -1,86 +1,271 @@
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
-import Button from '../components/Button'
+import {
+  fetchDashboardSummary,
+  fetchDashboardActivity,
+  fetchDashboardErrors,
+  resolveError,
+  deleteError,
+  clearErrors,
+} from '../services/api'
+import KpiCard from '../components/KpiCard'
+import DateRangeSelector from '../components/DateRangeSelector'
+import ActivityFeed from '../components/ActivityFeed'
+import ErrorPanel from '../components/ErrorPanel'
+import Alert from '../components/Alert'
 
-const stats = [
-  { label: 'Total Books', value: '1,247', icon: '📚' },
-  { label: 'Active Loans', value: '89', icon: '🔄' },
-  { label: 'Members', value: '324', icon: '👥' },
-  { label: 'Overdue', value: '12', icon: '⚠️' },
-]
+/**
+ * Dashboard — Daily ingestion dashboard for BridgeBooks.
+ *
+ * Displays:
+ *   1. KPI summary cards (files received, new ISBNs, metadata updates, error count)
+ *   2. Error notification panel with resolve/delete actions
+ *   3. Recent supplier file processing activity feed
+ *
+ * Features:
+ *   - Date range filtering (Today / Yesterday / This Week)
+ *   - Auto-refresh polling every 60 seconds
+ *   - Manual refresh button
+ *   - Loading skeletons and error handling
+ */
 
-const recentActivity = [
-  { title: 'The Great Gatsby', action: 'Checked out', user: 'Alice M.', time: '2 hours ago' },
-  { title: 'To Kill a Mockingbird', action: 'Returned', user: 'Bob K.', time: '3 hours ago' },
-  { title: '1984', action: 'Reserved', user: 'Carol J.', time: '5 hours ago' },
-  { title: 'Pride and Prejudice', action: 'Checked out', user: 'David L.', time: '1 day ago' },
-]
+const AUTO_REFRESH_MS = 60_000 // 60 seconds
 
 function Dashboard() {
-  const navigate = useNavigate()
   const { user } = useAuth()
 
+  // ── State ──
+  const [dateRange, setDateRange] = useState('today')
+  const [summary, setSummary] = useState(null)
+  const [activity, setActivity] = useState([])
+  const [errors, setErrors] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [fetchError, setFetchError] = useState(null)
+
+  const intervalRef = useRef(null)
+
+  // ── Data fetching ──
+  const loadDashboardData = useCallback(
+    async (isRefresh = false) => {
+      if (isRefresh) {
+        setRefreshing(true)
+      } else {
+        setLoading(true)
+      }
+      setFetchError(null)
+
+      try {
+        const [summaryData, activityData, errorsData] = await Promise.all([
+          fetchDashboardSummary(dateRange),
+          fetchDashboardActivity(dateRange),
+          fetchDashboardErrors(dateRange),
+        ])
+
+        setSummary(summaryData)
+        setActivity(activityData)
+        setErrors(errorsData)
+      } catch (err) {
+        setFetchError(err.message || 'Failed to load dashboard data')
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    },
+    [dateRange]
+  )
+
+  // Fetch on mount and when dateRange changes
+  useEffect(() => {
+    loadDashboardData()
+  }, [loadDashboardData])
+
+  // ── Auto-refresh polling ──
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      loadDashboardData(true)
+    }, AUTO_REFRESH_MS)
+
+    return () => clearInterval(intervalRef.current)
+  }, [loadDashboardData])
+
+  // ── Error actions ──
+  const handleResolve = async (errorId) => {
+    try {
+      await resolveError(errorId)
+      setErrors((prev) =>
+        prev.map((e) => (e.id === errorId ? { ...e, resolved: true } : e))
+      )
+      // Update the summary error count
+      setSummary((prev) =>
+        prev ? { ...prev, totalErrors: Math.max(0, prev.totalErrors - 1) } : prev
+      )
+    } catch {
+      setFetchError('Failed to resolve error')
+    }
+  }
+
+  const handleDelete = async (errorId) => {
+    try {
+      await deleteError(errorId)
+      const deleted = errors.find((e) => e.id === errorId)
+      setErrors((prev) => prev.filter((e) => e.id !== errorId))
+      // Update summary if it was unresolved
+      if (deleted && !deleted.resolved) {
+        setSummary((prev) =>
+          prev ? { ...prev, totalErrors: Math.max(0, prev.totalErrors - 1) } : prev
+        )
+      }
+    } catch {
+      setFetchError('Failed to delete error')
+    }
+  }
+
+  const handleClearAll = async () => {
+    try {
+      await clearErrors(true)
+      setErrors([])
+      setSummary((prev) => (prev ? { ...prev, totalErrors: 0 } : prev))
+    } catch {
+      setFetchError('Failed to clear errors')
+    }
+  }
+
+  // ── KPI card definitions ──
+  const kpiCards = [
+    {
+      title: 'Files Received',
+      value: summary?.filesReceived ?? 0,
+      accentColor: 'bg-info',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+        </svg>
+      ),
+    },
+    {
+      title: 'New ISBNs Added',
+      value: summary?.newIsbnsAdded ?? 0,
+      accentColor: 'bg-success',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+      ),
+    },
+    {
+      title: 'Metadata Updates',
+      value: summary?.metadataUpdates ?? 0,
+      accentColor: 'bg-primary-light',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      ),
+    },
+    {
+      title: 'Ingestion Errors',
+      value: summary?.totalErrors ?? 0,
+      accentColor: summary?.totalErrors > 0 ? 'bg-error' : 'bg-success',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+        </svg>
+      ),
+    },
+  ]
+
+  // ── Greeting based on time of day ──
+  const hour = new Date().getHours()
+  const greeting =
+    hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      {/* ── Header Row ── */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-primary-dark">Dashboard</h1>
-          <p className="text-text-secondary mt-1">
-            Welcome back{user?.name ? `, ${user.name}` : ''}! Here&apos;s what&apos;s happening in your library.
+          <h1 className="text-2xl sm:text-3xl font-bold text-primary-dark">
+            {greeting}{user?.name ? `, ${user.name}` : ''}
+          </h1>
+          <p className="text-text-secondary text-sm mt-1">
+            Here&apos;s your daily ingestion overview.
           </p>
         </div>
-        <Button variant="secondary" onClick={() => navigate('/search')}>
-          🔍 Find a Book
-        </Button>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <DateRangeSelector value={dateRange} onChange={setDateRange} />
+
+          {/* Refresh button */}
+          <button
+            id="dashboard-refresh-btn"
+            onClick={() => loadDashboardData(true)}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-border rounded-xl text-sm font-medium text-text-secondary hover:text-primary hover:border-primary/30 hover:shadow-sm transition-all duration-200 cursor-pointer disabled:opacity-50"
+            aria-label="Refresh dashboard data"
+          >
+            <svg
+              className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* ── Fetch Error Alert ── */}
+      {fetchError && (
+        <Alert
+          variant="error"
+          message={fetchError}
+          onDismiss={() => setFetchError(null)}
+        />
+      )}
+
+      {/* ── KPI Cards Grid ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="bg-white rounded-2xl border border-border p-6 shadow-sm hover:shadow-md transition-shadow duration-200 group"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-3xl group-hover:scale-110 transition-transform duration-200">
-                {stat.icon}
-              </span>
-              <span className="text-xs font-medium text-text-muted uppercase tracking-wider">
-                {stat.label}
-              </span>
-            </div>
-            <p className="text-4xl font-extrabold text-primary-dark">{stat.value}</p>
-          </div>
+        {kpiCards.map((card) => (
+          <KpiCard
+            key={card.title}
+            title={card.title}
+            value={card.value}
+            icon={card.icon}
+            accentColor={card.accentColor}
+            loading={loading}
+          />
         ))}
       </div>
 
-      {/* Recent Activity */}
-      <section>
-        <h2 className="text-xl font-semibold text-primary-dark mb-4">Recent Activity</h2>
-        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="divide-y divide-border">
-            {recentActivity.map((item, idx) => (
-              <div
-                key={idx}
-                className="flex items-center justify-between px-6 py-4 hover:bg-surface transition-colors duration-150"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-text-primary truncate">
-                    {item.title}
-                  </p>
-                  <p className="text-xs text-text-muted mt-0.5">
-                    {item.action} by {item.user}
-                  </p>
-                </div>
-                <span className="text-xs text-text-muted whitespace-nowrap ml-4">
-                  {item.time}
-                </span>
-              </div>
-            ))}
-          </div>
+      {/* ── Error Panel ── */}
+      <ErrorPanel
+        errors={errors}
+        loading={loading}
+        onResolve={handleResolve}
+        onDelete={handleDelete}
+        onClearAll={handleClearAll}
+      />
+
+      {/* ── Activity Feed ── */}
+      <ActivityFeed
+        activities={activity}
+        loading={loading}
+      />
+
+      {/* ── Auto-refresh indicator ── */}
+      {!loading && (
+        <div className="text-center text-xs text-text-muted pb-2">
+          Auto-refreshes every 60 seconds
+          {summary?.lastUpdated && (
+            <>
+              {' · '}Last updated {new Date(summary.lastUpdated).toLocaleTimeString('en-ZA')}
+            </>
+          )}
         </div>
-      </section>
+      )}
     </div>
   )
 }

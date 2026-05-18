@@ -85,10 +85,50 @@ export async function fetchBookById(id) {
 
 /* ============ Dashboard ============ */
 
-export async function fetchDashboardStats() {
-  return request('/dashboard/stats')
+/**
+ * Fetch dashboard KPI summary.
+ * @param {'today'|'yesterday'|'week'} range
+ */
+export async function fetchDashboardSummary(range = 'today') {
+  return request(`/dashboard/summary?range=${encodeURIComponent(range)}`)
 }
 
-export async function fetchRecentActivity() {
-  return request('/dashboard/activity')
+/**
+ * Fetch recent supplier activity / sync events.
+ * @param {'today'|'yesterday'|'week'} range
+ */
+export async function fetchDashboardActivity(range = 'today') {
+  return request(`/dashboard/activity?range=${encodeURIComponent(range)}`)
+}
+
+/**
+ * Fetch ingestion error logs.
+ * @param {'today'|'yesterday'|'week'} range
+ */
+export async function fetchDashboardErrors(range = 'today') {
+  return request(`/dashboard/errors?range=${encodeURIComponent(range)}`)
+}
+
+/**
+ * Mark a specific error as resolved.
+ * @param {string} errorId
+ */
+export async function resolveError(errorId) {
+  return request(`/dashboard/errors/${errorId}/resolve`, { method: 'POST' })
+}
+
+/**
+ * Delete a specific error log entry.
+ * @param {string} errorId
+ */
+export async function deleteError(errorId) {
+  return request(`/dashboard/errors/${errorId}`, { method: 'DELETE' })
+}
+
+/**
+ * Clear all resolved errors (or all errors if clearAll is true).
+ * @param {boolean} clearAll
+ */
+export async function clearErrors(clearAll = false) {
+  return request(`/dashboard/errors/clear${clearAll ? '?all=true' : ''}`, { method: 'POST' })
 }
