@@ -5,7 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Search from './pages/Search'
-import SyncStatus from './pages/SyncStatus'
+import Status from './pages/Status'
 import './index.css'
 
 /**
@@ -52,10 +52,10 @@ function App() {
               }
             />
             <Route
-              path="sync"
+              path="status"
               element={
                 <ProtectedRoute>
-                  <SyncStatus />
+                  <Status />
                 </ProtectedRoute>
               }
             />

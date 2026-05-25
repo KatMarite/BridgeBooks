@@ -132,3 +132,10 @@ export async function deleteError(errorId) {
 export async function clearErrors(clearAll = false) {
   return request(`/dashboard/errors/clear${clearAll ? '?all=true' : ''}`, { method: 'POST' })
 }
+
+/**
+ * Fetch system sync logs for all suppliers.
+ */
+export async function fetchSystemSyncLogs() {
+  return request('/system/sync-logs')
+}
