@@ -1,3 +1,5 @@
+import Button from './Button'
+
 /**
  * SearchBar — Reusable, accessible search input with optional filter + clear.
  *
@@ -6,6 +8,7 @@
  *   - onSubmit: called on form submit (Enter / Search button)
  *   - onClear: optional; shows an X button when value is non-empty
  *   - filterValue/onFilterChange/filterOptions: optional; renders a <select>
+ *   - isLoading: shows loading state on the search button
  */
 function SearchBar({
   placeholder = 'Search books...',
@@ -17,6 +20,7 @@ function SearchBar({
   filterValue,
   onFilterChange,
   filterOptions,
+  isLoading = false,
 }) {
   const showFilter = Array.isArray(filterOptions) && filterOptions.length > 0
   const showClear = typeof onClear === 'function' && (value || '').length > 0
@@ -92,12 +96,14 @@ function SearchBar({
           )}
         </div>
 
-        <button
+        <Button
           type="submit"
-          className="px-5 py-2.5 bg-accent hover:bg-accent-dark text-primary-dark font-semibold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer"
+          variant="primary"
+          className="px-5 py-2.5 rounded-xl h-full"
+          isLoading={isLoading}
         >
           Search
-        </button>
+        </Button>
       </div>
     </form>
   )

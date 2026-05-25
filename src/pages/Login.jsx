@@ -110,16 +110,9 @@ function Login() {
               variant="primary"
               size="lg"
               className="w-full"
-              disabled={submitting}
+              isLoading={submitting}
             >
-              {submitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Spinner size="sm" />
-                  Signing in…
-                </span>
-              ) : (
-                'Sign In'
-              )}
+              {submitting ? 'Signing in…' : 'Sign In'}
             </Button>
           </form>
 

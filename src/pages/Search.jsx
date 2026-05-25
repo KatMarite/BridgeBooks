@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import Alert from '../components/Alert'
 import BookCard from '../components/BookCard'
 import BookResultsTable from '../components/BookResultsTable'
@@ -94,6 +94,15 @@ function Search() {
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
+  const [debouncedQuery, setDebouncedQuery] = useState(query)
+
+  useEffect(() => {
+    const timerId = setTimeout(() => {
+      setDebouncedQuery(query)
+    }, 500)
+    return () => clearTimeout(timerId)
+  }, [query])
+
   const placeholder = useMemo(() => {
     if (filter === 'isbn') return 'Search by ISBN…'
     if (filter === 'title') return 'Search by title…'
@@ -103,17 +112,9 @@ function Search() {
 
   const normalizedResults = useMemo(() => results.map(normalizeBook), [results])
 
-  const handleClear = () => {
-    setQuery('')
-    setFilter('all')
-    setResults([])
-    setHasSearched(false)
+  const performSearch = async (qString, filterType) => {
     setErrorMessage('')
-  }
-
-  const handleSubmit = async () => {
-    setErrorMessage('')
-    const q = sanitizeQuery(query, filter)
+    const q = sanitizeQuery(qString, filterType)
 
     if (!q) {
       setResults([])
@@ -124,7 +125,7 @@ function Search() {
     setHasSearched(true)
     setIsLoading(true)
     try {
-      const data = await searchBooks({ q, field: filter === 'all' ? undefined : filter })
+      const data = await searchBooks({ q, field: filterType === 'all' ? undefined : filterType })
       const list = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : [])
       setResults(list)
     } catch (err) {
@@ -133,6 +134,29 @@ function Search() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Auto-search on debounced query or filter change
+  useEffect(() => {
+    // Avoid fetching on initial mount if query is empty
+    if (!debouncedQuery && !hasSearched) return
+    performSearch(debouncedQuery, filter)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQuery, filter])
+
+  const handleClear = () => {
+    setQuery('')
+    setDebouncedQuery('')
+    setFilter('all')
+    setResults([])
+    setHasSearched(false)
+    setErrorMessage('')
+  }
+
+  const handleSubmit = () => {
+    // Force immediate search bypass debounce
+    setDebouncedQuery(query)
+    performSearch(query, filter)
   }
 
   return (
@@ -155,6 +179,7 @@ function Search() {
             filterValue={filter}
             onFilterChange={setFilter}
             filterOptions={FILTER_OPTIONS}
+            isLoading={isLoading}
           />
         </div>
 
