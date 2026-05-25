@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 /* ===== BridgeBooks Design System ===== */
 
@@ -52,8 +53,7 @@
   border-radius: 0.5rem;
 }
 
-/* Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+/* Google Fonts imported at top */
 
 /* Base Resets */
 *, *::before, *::after {
