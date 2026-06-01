@@ -86,3 +86,19 @@ a {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* Override form slide-in animation */
+@keyframes override-form-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.override-form-enter {
+  animation: override-form-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

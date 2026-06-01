@@ -6,6 +6,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Search from './pages/Search'
 import Status from './pages/Status'
+import PriceOverrides from './pages/PriceOverrides'
 import './index.css'
 
 /**
@@ -56,6 +57,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Status />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="price-overrides"
+              element={
+                <ProtectedRoute>
+                  <PriceOverrides />
                 </ProtectedRoute>
               }
             />

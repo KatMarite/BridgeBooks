@@ -139,3 +139,31 @@ export async function clearErrors(clearAll = false) {
 export async function fetchSystemSyncLogs() {
   return request('/system/sync-logs')
 }
+
+/* ============ Price Overrides ============ */
+
+/**
+ * Fetch all active price overrides.
+ */
+export async function fetchPriceOverrides() {
+  return request('/price-overrides')
+}
+
+/**
+ * Create or update a price override.
+ * @param {{ bookId, isbn, title, author, originalPrice?, overridePrice, reason, notes? }} data
+ */
+export async function createPriceOverride(data) {
+  return request('/price-overrides', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/**
+ * Delete a price override by ID.
+ * @param {string} id
+ */
+export async function deletePriceOverride(id) {
+  return request(`/price-overrides/${id}`, { method: 'DELETE' })
+}

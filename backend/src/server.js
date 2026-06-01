@@ -220,6 +220,77 @@ app.post('/api/dashboard/errors/clear', (req, res) => {
   res.json({ success: true, remaining: currentErrors.length })
 })
 
+/* ===========================================================================
+   Price Override Endpoints
+   =========================================================================== */
+
+let priceOverrides = []
+let nextOverrideId = 1
+
+/**
+ * GET /api/price-overrides
+ * Returns all active price overrides.
+ */
+app.get('/api/price-overrides', (_req, res) => {
+  res.json(priceOverrides)
+})
+
+/**
+ * POST /api/price-overrides
+ * Create or update a price override.
+ * Body: { bookId, isbn, title, author, originalPrice?, overridePrice, reason, notes? }
+ */
+app.post('/api/price-overrides', (req, res) => {
+  const { bookId, isbn, title, author, originalPrice, overridePrice, reason, notes } = req.body
+
+  if (!overridePrice || !reason) {
+    return res.status(400).json({ message: 'overridePrice and reason are required' })
+  }
+
+  // Check if an override already exists for this book
+  const existing = priceOverrides.find(
+    (o) => (bookId && o.bookId === bookId) || (isbn && o.isbn === isbn)
+  )
+
+  if (existing) {
+    // Update existing override
+    existing.overridePrice = Number(overridePrice)
+    existing.reason = reason
+    existing.notes = notes || ''
+    existing.updatedAt = new Date().toISOString()
+    return res.json({ success: true, override: existing })
+  }
+
+  const override = {
+    id: `po-${nextOverrideId++}`,
+    bookId: bookId || isbn || `manual-${Date.now()}`,
+    isbn: isbn || '',
+    title: title || 'Unknown Title',
+    author: author || '',
+    originalPrice: originalPrice != null ? Number(originalPrice) : null,
+    overridePrice: Number(overridePrice),
+    reason,
+    notes: notes || '',
+    createdAt: new Date().toISOString(),
+    createdBy: 'staff@bridgebooks.co.za',
+  }
+
+  priceOverrides.push(override)
+  res.status(201).json({ success: true, override })
+})
+
+/**
+ * DELETE /api/price-overrides/:id
+ * Remove a price override.
+ */
+app.delete('/api/price-overrides/:id', (req, res) => {
+  const idx = priceOverrides.findIndex((o) => o.id === req.params.id)
+  if (idx === -1) return res.status(404).json({ message: 'Override not found' })
+
+  priceOverrides.splice(idx, 1)
+  res.json({ success: true })
+})
+
 const PORT = Number(process.env.PORT) || 3001
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console

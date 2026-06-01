@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: '📊' },
   { to: '/search', label: 'Book Search', icon: '🔍' },
   { to: '/status', label: 'System Status', icon: '⚙️' },
+  { to: '/price-overrides', label: 'Price Overrides', icon: '💰' },
 ]
 
 function Layout() {
