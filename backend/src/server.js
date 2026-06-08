@@ -291,6 +291,261 @@ app.delete('/api/price-overrides/:id', (req, res) => {
   res.json({ success: true })
 })
 
+/* ===========================================================================
+   Indie Submissions Review Queue
+   =========================================================================== */
+
+let nextSubmissionId = 11
+
+const indieSubmissions = [
+  {
+    id: 'sub-1',
+    title: 'The Karoo Dreamweaver',
+    authorName: 'Lindiwe Mokoena',
+    authorEmail: 'lindiwe.mokoena@gmail.com',
+    synopsis: 'A magical realism novel set in the vast Karoo landscape, where a young shepherd discovers she can weave dreams into reality. As drought threatens her community, she must learn to harness her gift before the land — and its stories — are lost forever. Blending Sotho folklore with contemporary South African life.',
+    pageCount: 312,
+    suggestedPrice: 289.99,
+    coverImageUrl: '',
+    submissionDate: '2026-05-28T09:14:00Z',
+    status: 'pending',
+    reviewedBy: null,
+    reviewedAt: null,
+    rejectionReason: null,
+  },
+  {
+    id: 'sub-2',
+    title: 'Echoes of Table Mountain',
+    authorName: 'James van der Berg',
+    authorEmail: 'jvdberg.writes@outlook.com',
+    synopsis: 'A literary thriller following a Cape Town journalist who uncovers a decades-old conspiracy buried in the archives of the District Six Museum. Each chapter peels back another layer of truth, weaving between 1968 and the present day.',
+    pageCount: 278,
+    suggestedPrice: 265.00,
+    coverImageUrl: '',
+    submissionDate: '2026-05-30T14:22:00Z',
+    status: 'pending',
+    reviewedBy: null,
+    reviewedAt: null,
+    rejectionReason: null,
+  },
+  {
+    id: 'sub-3',
+    title: 'Ubuntu Kitchen: Recipes for Community',
+    authorName: 'Fatima Abrahams',
+    authorEmail: 'fatima.abrahams@cookza.co.za',
+    synopsis: 'A cookbook celebrating the diverse culinary traditions of South Africa. Over 120 recipes from Cape Malay to Zulu to Indian-influenced dishes, each accompanied by stories of the communities and families that created them. Includes stunning food photography.',
+    pageCount: 224,
+    suggestedPrice: 445.00,
+    coverImageUrl: '',
+    submissionDate: '2026-06-01T08:45:00Z',
+    status: 'pending',
+    reviewedBy: null,
+    reviewedAt: null,
+    rejectionReason: null,
+  },
+  {
+    id: 'sub-4',
+    title: 'The Algorithm of Us',
+    authorName: 'Thabo Nkosi',
+    authorEmail: 'thabo.nkosi@techmail.com',
+    synopsis: 'A near-future romance set in Johannesburg where two AI researchers fall in love while building an algorithm designed to predict human compatibility. When their own relationship becomes the test case, they must decide: trust the data or trust their hearts?',
+    pageCount: 198,
+    suggestedPrice: 225.00,
+    coverImageUrl: '',
+    submissionDate: '2026-06-02T11:30:00Z',
+    status: 'pending',
+    reviewedBy: null,
+    reviewedAt: null,
+    rejectionReason: null,
+  },
+  {
+    id: 'sub-5',
+    title: 'Wildflower Coast',
+    authorName: 'Sarah du Plessis',
+    authorEmail: 'sarah.duplessis@writersza.org',
+    synopsis: 'A coming-of-age novel following three friends through a summer on the West Coast, where fields of wildflowers hide long-buried secrets. As the Namaqualand blooms, so does the truth about the ties that bind them.',
+    pageCount: 256,
+    suggestedPrice: 249.99,
+    coverImageUrl: '',
+    submissionDate: '2026-05-15T16:00:00Z',
+    status: 'approved',
+    reviewedBy: 'Admin User',
+    reviewedAt: '2026-05-20T10:30:00Z',
+    rejectionReason: null,
+  },
+  {
+    id: 'sub-6',
+    title: 'Code of the Savanna',
+    authorName: 'Mpho Dlamini',
+    authorEmail: 'mpho.d@gmail.com',
+    synopsis: 'A children\'s adventure book where a young programmer from Soweto creates a game that accidentally opens a portal to the African savanna. With the help of a wise pangolin and a mischievous honey badger, she must debug her code to find her way home.',
+    pageCount: 144,
+    suggestedPrice: 189.99,
+    coverImageUrl: '',
+    submissionDate: '2026-05-10T13:15:00Z',
+    status: 'approved',
+    reviewedBy: 'Staff Member',
+    reviewedAt: '2026-05-18T09:00:00Z',
+    rejectionReason: null,
+  },
+  {
+    id: 'sub-7',
+    title: 'Midnight in Maboneng',
+    authorName: 'Zinhle Khumalo',
+    authorEmail: 'zinhle.k@artmail.co.za',
+    synopsis: 'A poetry collection exploring urban life, identity, and love in Johannesburg\'s vibrant Maboneng precinct. Each poem is paired with original street art photography from the neighbourhood.',
+    pageCount: 96,
+    suggestedPrice: 175.00,
+    coverImageUrl: '',
+    submissionDate: '2026-05-12T10:00:00Z',
+    status: 'approved',
+    reviewedBy: 'Admin User',
+    reviewedAt: '2026-05-22T14:45:00Z',
+    rejectionReason: null,
+  },
+  {
+    id: 'sub-8',
+    title: 'Get Rich Quick with Crypto',
+    authorName: 'Derek Schoeman',
+    authorEmail: 'derek.crypto99@mail.com',
+    synopsis: 'Learn the secrets the banks don\'t want you to know! This book promises guaranteed returns through a revolutionary crypto trading strategy. Includes access to an exclusive Telegram group.',
+    pageCount: 88,
+    suggestedPrice: 599.99,
+    coverImageUrl: '',
+    submissionDate: '2026-05-08T07:30:00Z',
+    status: 'rejected',
+    reviewedBy: 'Admin User',
+    reviewedAt: '2026-05-09T08:00:00Z',
+    rejectionReason: 'Content makes unsubstantiated financial claims and promises guaranteed returns, which is misleading. The book appears to be primarily a vehicle for promoting a paid Telegram group rather than providing genuine educational content.',
+  },
+  {
+    id: 'sub-9',
+    title: 'Whispers of the Drakensberg',
+    authorName: 'Nomusa Cele',
+    authorEmail: 'nomusa.cele@kznwriters.co.za',
+    synopsis: 'A historical novel set during the Anglo-Zulu War, told from the perspective of a young Zulu healer who must navigate between two worlds as conflict engulfs the Drakensberg mountains.',
+    pageCount: 340,
+    suggestedPrice: 310.00,
+    coverImageUrl: '',
+    submissionDate: '2026-06-04T15:20:00Z',
+    status: 'pending',
+    reviewedBy: null,
+    reviewedAt: null,
+    rejectionReason: null,
+  },
+  {
+    id: 'sub-10',
+    title: 'My Manifesto (Unedited)',
+    authorName: 'Anonymous Author',
+    authorEmail: 'truth.seeker.2026@protonmail.com',
+    synopsis: 'A raw, unedited collection of political opinions and conspiracy theories. The author refuses editorial feedback and demands the book be published exactly as submitted.',
+    pageCount: 412,
+    suggestedPrice: 150.00,
+    coverImageUrl: '',
+    submissionDate: '2026-05-05T22:10:00Z',
+    status: 'rejected',
+    reviewedBy: 'Staff Member',
+    reviewedAt: '2026-05-07T11:30:00Z',
+    rejectionReason: 'Manuscript does not meet editorial standards. Content contains unverified claims and the author has declined all editorial collaboration. We encourage the author to work with an editor and resubmit a revised manuscript.',
+  },
+]
+
+/**
+ * GET /api/indie-submissions
+ * Query params: status, search, sort (oldest|newest)
+ */
+app.get('/api/indie-submissions', (req, res) => {
+  let results = [...indieSubmissions]
+
+  // Filter by status
+  const status = (req.query.status || '').toLowerCase()
+  if (status && status !== 'all') {
+    results = results.filter((s) => s.status === status)
+  }
+
+  // Search by title or author name
+  const search = (req.query.search || '').trim().toLowerCase()
+  if (search) {
+    results = results.filter(
+      (s) =>
+        s.title.toLowerCase().includes(search) ||
+        s.authorName.toLowerCase().includes(search)
+    )
+  }
+
+  // Sort by submission date
+  const sort = (req.query.sort || 'newest').toLowerCase()
+  results.sort((a, b) => {
+    const da = new Date(a.submissionDate)
+    const db = new Date(b.submissionDate)
+    return sort === 'oldest' ? da - db : db - da
+  })
+
+  res.json(results)
+})
+
+/**
+ * GET /api/indie-submissions/count
+ * Returns { pending: N }
+ */
+app.get('/api/indie-submissions/count', (_req, res) => {
+  const pending = indieSubmissions.filter((s) => s.status === 'pending').length
+  res.json({ pending })
+})
+
+/**
+ * GET /api/indie-submissions/:id
+ */
+app.get('/api/indie-submissions/:id', (req, res) => {
+  const sub = indieSubmissions.find((s) => s.id === req.params.id)
+  if (!sub) return res.status(404).json({ message: 'Submission not found' })
+  res.json(sub)
+})
+
+/**
+ * POST /api/indie-submissions/:id/approve
+ * Body: { reviewedBy }
+ */
+app.post('/api/indie-submissions/:id/approve', (req, res) => {
+  const sub = indieSubmissions.find((s) => s.id === req.params.id)
+  if (!sub) return res.status(404).json({ message: 'Submission not found' })
+
+  if (sub.status !== 'pending') {
+    return res.status(400).json({ message: `Cannot approve a submission with status "${sub.status}"` })
+  }
+
+  sub.status = 'approved'
+  sub.reviewedBy = req.body.reviewedBy || 'Unknown'
+  sub.reviewedAt = new Date().toISOString()
+  sub.rejectionReason = null
+
+  res.json({ success: true, submission: sub })
+})
+
+/**
+ * POST /api/indie-submissions/:id/reject
+ * Body: { reviewedBy, rejectionReason }
+ */
+app.post('/api/indie-submissions/:id/reject', (req, res) => {
+  const sub = indieSubmissions.find((s) => s.id === req.params.id)
+  if (!sub) return res.status(404).json({ message: 'Submission not found' })
+
+  if (sub.status !== 'pending') {
+    return res.status(400).json({ message: `Cannot reject a submission with status "${sub.status}"` })
+  }
+
+  if (!req.body.rejectionReason || !req.body.rejectionReason.trim()) {
+    return res.status(400).json({ message: 'A rejection reason is required' })
+  }
+
+  sub.status = 'rejected'
+  sub.reviewedBy = req.body.reviewedBy || 'Unknown'
+  sub.reviewedAt = new Date().toISOString()
+  sub.rejectionReason = req.body.rejectionReason.trim()
+
+  res.json({ success: true, submission: sub })
+})
+
 const PORT = Number(process.env.PORT) || 3001
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console

@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard'
 import Search from './pages/Search'
 import Status from './pages/Status'
 import PriceOverrides from './pages/PriceOverrides'
+import IndieQueue from './pages/IndieQueue'
 import './index.css'
 
 /**
@@ -65,6 +66,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <PriceOverrides />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="indie-queue"
+              element={
+                <ProtectedRoute>
+                  <IndieQueue />
                 </ProtectedRoute>
               }
             />

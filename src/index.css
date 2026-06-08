@@ -102,3 +102,77 @@ a {
 .override-form-enter {
   animation: override-form-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Toast slide-in from top-right */
+@keyframes toast-enter-kf {
+  from {
+    opacity: 0;
+    transform: translateX(100%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.toast-enter {
+  animation: toast-enter-kf 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Toast slide-out */
+@keyframes toast-exit-kf {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%) scale(0.95);
+  }
+}
+
+.toast-exit {
+  animation: toast-exit-kf 0.3s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+/* Toast progress bar countdown */
+@keyframes toast-progress {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+/* Modal backdrop fade-in */
+@keyframes modal-backdrop-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-backdrop-enter {
+  animation: modal-backdrop-enter 0.2s ease-out forwards;
+}
+
+/* Modal content scale-in */
+@keyframes modal-content-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modal-content-enter {
+  animation: modal-content-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Nav badge pulse */
+@keyframes badge-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+.badge-pulse {
+  animation: badge-pulse 2s ease-in-out infinite;
+}

@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { fetchIndiePendingCount } from '../services/api'
 
 /**
  * Layout — Main application shell.
@@ -18,12 +19,32 @@ const NAV_ITEMS = [
   { to: '/search', label: 'Book Search', icon: '🔍' },
   { to: '/status', label: 'System Status', icon: '⚙️' },
   { to: '/price-overrides', label: 'Price Overrides', icon: '💰' },
+  { to: '/indie-queue', label: 'Indie Submissions', icon: '📝', hasBadge: true },
 ]
 
 function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [pendingCount, setPendingCount] = useState(0)
   const { isAuthenticated, user, logout } = useAuth()
   const navigate = useNavigate()
+
+  // Fetch pending indie submission count for the nav badge
+  useEffect(() => {
+    if (!isAuthenticated) return
+    let cancelled = false
+    const loadCount = async () => {
+      try {
+        const data = await fetchIndiePendingCount()
+        if (!cancelled) setPendingCount(data?.pending || 0)
+      } catch {
+        // silently ignore — badge just won't show
+      }
+    }
+    loadCount()
+    // Refresh every 30 seconds
+    const interval = setInterval(loadCount, 30000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [isAuthenticated])
 
   const handleLogout = () => {
     logout()
@@ -68,6 +89,11 @@ function Layout() {
                 >
                   <span className="mr-1.5">{item.icon}</span>
                   {item.label}
+                  {item.hasBadge && pendingCount > 0 && (
+                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[10px] font-bold bg-accent text-primary-dark badge-pulse">
+                      {pendingCount}
+                    </span>
+                  )}
                 </NavLink>
               ))}
 
@@ -142,6 +168,11 @@ function Layout() {
                 >
                   <span className="mr-2">{item.icon}</span>
                   {item.label}
+                  {item.hasBadge && pendingCount > 0 && (
+                    <span className="ml-2 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[10px] font-bold bg-accent text-primary-dark badge-pulse">
+                      {pendingCount}
+                    </span>
+                  )}
                 </NavLink>
               ))}
 

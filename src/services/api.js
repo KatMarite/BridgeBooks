@@ -167,3 +167,57 @@ export async function createPriceOverride(data) {
 export async function deletePriceOverride(id) {
   return request(`/price-overrides/${id}`, { method: 'DELETE' })
 }
+
+/* ============ Indie Submissions ============ */
+
+/**
+ * Fetch indie submissions with optional filters.
+ * @param {{ status?: string, search?: string, sort?: 'newest'|'oldest' }} params
+ */
+export async function fetchIndieSubmissions({ status, search, sort } = {}) {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  if (search) params.set('search', search)
+  if (sort) params.set('sort', sort)
+  const qs = params.toString()
+  return request(`/indie-submissions${qs ? `?${qs}` : ''}`)
+}
+
+/**
+ * Fetch the count of pending indie submissions (for nav badge).
+ */
+export async function fetchIndiePendingCount() {
+  return request('/indie-submissions/count')
+}
+
+/**
+ * Fetch a single indie submission by ID.
+ * @param {string} id
+ */
+export async function fetchIndieSubmissionById(id) {
+  return request(`/indie-submissions/${id}`)
+}
+
+/**
+ * Approve an indie submission.
+ * @param {string} id
+ * @param {{ reviewedBy: string }} data
+ */
+export async function approveIndieSubmission(id, data) {
+  return request(`/indie-submissions/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/**
+ * Reject an indie submission.
+ * @param {string} id
+ * @param {{ reviewedBy: string, rejectionReason: string }} data
+ */
+export async function rejectIndieSubmission(id, data) {
+  return request(`/indie-submissions/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
