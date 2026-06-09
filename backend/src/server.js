@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import { BOOKS } from './data/books.js'
+import { connectDb, isDbConnected, query } from './db.js'
 
 const app = express()
 
@@ -8,7 +9,7 @@ app.use(cors())
 app.use(express.json())
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true })
+  res.json({ ok: true, dbConnected: isDbConnected })
 })
 
 /* ===========================================================================
@@ -141,14 +142,108 @@ function matchesBook(book, q, field) {
  * Book search endpoint
  * GET /api/books?q=...&field=all|isbn|title|author
  */
-app.get('/api/books', (req, res) => {
+app.get('/api/books', async (req, res) => {
   const q = normalizeQuery(req.query.q)
   const field = (req.query.field || 'all').toString().toLowerCase()
 
   if (!q) return res.json([])
 
+  // ── 1. PostgreSQL dual-mode integration ──
+  if (isDbConnected) {
+    try {
+      // Build SQL based on search field
+      let whereClause = ''
+      let param = `%${q}%`
+      
+      if (field === 'isbn') {
+        whereClause = 'WHERE b.isbn_13 ILIKE $1'
+        param = `%${stripIsbnFormatting(q)}%`
+      } else if (field === 'title') {
+        whereClause = 'WHERE b.title ILIKE $1'
+      } else if (field === 'author') {
+        whereClause = 'WHERE b.author ILIKE $1'
+      } else {
+        whereClause = 'WHERE b.title ILIKE $1 OR b.author ILIKE $1 OR b.isbn_13 ILIKE $1'
+      }
+
+      // Query books and aggregate their supplier prices
+      const sql = `
+        SELECT 
+          b.isbn_13 AS isbn, 
+          b.title, 
+          b.author, 
+          b.publication_date AS "publicationDate", 
+          b.cover_image_url AS "coverImageUrl",
+          json_object_agg(
+            sp.supplier_name,
+            json_build_object(
+              'price', sp.retail_price,
+              'inStock', sp.in_stock,
+              'qty', sp.stock_quantity
+            )
+          ) FILTER (WHERE sp.supplier_name IS NOT NULL) AS suppliers
+        FROM books b
+        LEFT JOIN supplier_prices sp ON b.isbn_13 = sp.isbn_13
+        ${whereClause}
+        GROUP BY b.isbn_13
+        LIMIT 50
+      `
+      
+      const result = await query(sql, [param])
+      return res.json(result.rows)
+    } catch (err) {
+      console.error('Database query failed, falling back to mock:', err)
+      // Fall through to mock logic on failure
+    }
+  }
+
+  // ── 2. Fallback in-memory mock logic ──
   const results = BOOKS.filter((b) => matchesBook(b, q, field))
   res.json(results)
+})
+
+/**
+ * GET /api/books/:id
+ * Fetch a single book by ISBN.
+ */
+app.get('/api/books/:id', async (req, res) => {
+  const { id } = req.params
+
+  if (isDbConnected) {
+    try {
+      const sql = `
+        SELECT 
+          b.isbn_13 AS isbn, 
+          b.title, 
+          b.author, 
+          b.publication_date AS "publicationDate", 
+          b.cover_image_url AS "coverImageUrl",
+          json_object_agg(
+            sp.supplier_name,
+            json_build_object(
+              'price', sp.retail_price,
+              'inStock', sp.in_stock,
+              'qty', sp.stock_quantity
+            )
+          ) FILTER (WHERE sp.supplier_name IS NOT NULL) AS suppliers
+        FROM books b
+        LEFT JOIN supplier_prices sp ON b.isbn_13 = sp.isbn_13
+        WHERE b.isbn_13 = $1
+        GROUP BY b.isbn_13
+      `
+      const result = await query(sql, [id])
+      if (result.rows.length === 0) {
+        return res.status(404).json({ message: 'Book not found' })
+      }
+      return res.json(result.rows[0])
+    } catch (err) {
+      console.error('Database query failed for book ID, falling back to mock:', err)
+    }
+  }
+
+  const book = BOOKS.find((b) => b.isbn === id || b.id === id)
+  if (!book) return res.status(404).json({ message: 'Book not found' })
+  res.json(book)
 })
 
 /* ===========================================================================
@@ -650,7 +745,36 @@ app.post('/api/indie-submissions/:id/reject', (req, res) => {
 })
 
 const PORT = Number(process.env.PORT) || 3001
-app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`BridgeBooks backend listening on http://localhost:${PORT}`)
-})
+
+async function startServer() {
+  console.log('🔄 Starting BridgeBooks backend...')
+  
+  // Attempt DB connection
+  const dbIsAvailable = await connectDb()
+  
+  if (dbIsAvailable) {
+    try {
+      console.log('🌱 Auto-seeding database...')
+      // We run the seed script directly here by importing and calling it
+      // but since it's a separate file we can just use child_process or do nothing here since package.json has 'npm run seed'.
+      // Wait, the user asked for auto-seed on startup. Let's do it by running the script.
+      const { exec } = await import('child_process')
+      await new Promise((resolve) => {
+        exec('node src/seed.js', (err, stdout, stderr) => {
+          if (err) console.error('Auto-seed failed:', stderr)
+          else console.log(stdout.trim())
+          resolve()
+        })
+      })
+    } catch (err) {
+      console.error('Auto-seed error:', err)
+    }
+  }
+
+  app.listen(PORT, () => {
+    // eslint-disable-next-line no-console
+    console.log(`🚀 BridgeBooks backend listening on http://localhost:${PORT}`)
+  })
+}
+
+startServer()
