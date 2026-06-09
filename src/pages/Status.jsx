@@ -14,16 +14,8 @@ function Status() {
         const data = await fetchSystemSyncLogs();
         setLogs(Array.isArray(data) ? data : Object.values(data));
       } catch (err) {
-        console.error("API failed, using mock data for demonstration", err);
-        // Fallback mock data to show the UI since Developer 2's backend endpoint might not be ready
-        setLogs([
-          { supplier: 'Booksite', lastSyncTime: new Date().toISOString(), rowsProcessed: 1200, errorsFlagged: 0, status: 'success' },
-          { supplier: 'Jonathan Ball', lastSyncTime: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), rowsProcessed: 800, errorsFlagged: 5, status: 'success' }, // stale
-          { supplier: 'Protea', lastSyncTime: new Date().toISOString(), rowsProcessed: 0, errorsFlagged: 12, status: 'failed' }, // failed
-          { supplier: 'Indie Authors', lastSyncTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), rowsProcessed: 15, errorsFlagged: 0, status: 'success' }
-        ]);
-        // Show a gentle notice above
-        setError("Could not connect to live backend endpoint. Displaying mock data for demonstration.");
+        console.error("Failed to load sync logs", err);
+        setError("Could not load sync status. Please check that the backend is running.");
       } finally {
         setLoading(false);
       }

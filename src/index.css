@@ -176,3 +176,62 @@ a {
 .badge-pulse {
   animation: badge-pulse 2s ease-in-out infinite;
 }
+
+/* ==== Mobile & Low-Bandwidth Optimizations (Phase 1 / Week 5) ==== */
+
+/* Respect user's reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Minimum touch targets for mobile (WCAG 2.5.5 — 44×44px) */
+@media (pointer: coarse) {
+  button,
+  a,
+  [role="button"],
+  input[type="checkbox"],
+  input[type="radio"],
+  select {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Slightly larger tap targets on navigation links */
+  nav a {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+}
+
+/* Horizontal scroll wrapper for data tables on small screens */
+.table-scroll-mobile {
+  -webkit-overflow-scrolling: touch;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+/* Prevent text size adjustment on orientation change */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Optimize touch interactions */
+@media (hover: none) {
+  /* Remove hover states on touch devices to avoid sticky hover */
+  .hover-desktop-only:hover {
+    background-color: inherit;
+    color: inherit;
+  }
+}
+
+/* Optimized font loading for low-bandwidth */
+@font-face {
+  font-family: 'Inter';
+  font-display: swap;
+}

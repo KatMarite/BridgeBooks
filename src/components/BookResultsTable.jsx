@@ -3,7 +3,7 @@ import SupplierMatrix from './SupplierMatrix'
 function BookResultsTable({ books }) {
   return (
     <div className="hidden md:block">
-      <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
+      <div className="table-scroll-mobile overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
         <table className="w-full text-left">
           <thead className="bg-surface">
             <tr className="text-xs font-semibold text-text-muted">

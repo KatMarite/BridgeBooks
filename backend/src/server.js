@@ -11,6 +11,109 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true })
 })
 
+/* ===========================================================================
+   Authentication
+   =========================================================================== */
+
+const USERS = [
+  {
+    id: '1',
+    name: 'Admin User',
+    email: 'admin@bridgebooks.co.za',
+    password: 'bridge2026',
+    role: 'admin',
+  },
+  {
+    id: '2',
+    name: 'Staff Member',
+    email: 'staff@bridgebooks.co.za',
+    password: 'staff2026',
+    role: 'staff',
+  },
+]
+
+/**
+ * POST /api/auth/login
+ * Body: { email, password }
+ * Returns: { token, user: { id, name, email, role } }
+ *
+ * NOTE: This is a development-only mock. Replace with real JWT auth
+ * once the production database and user management are in place.
+ */
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body
+
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required.' })
+  }
+
+  const normalised = email.trim().toLowerCase()
+  const found = USERS.find(
+    (u) => u.email === normalised && u.password === password
+  )
+
+  if (!found) {
+    return res.status(401).json({ message: 'Invalid email or password.' })
+  }
+
+  // Build a development-only fake JWT (not cryptographically valid)
+  const payload = Buffer.from(
+    JSON.stringify({ sub: found.id, email: found.email, role: found.role })
+  ).toString('base64')
+  const token = `dev.${payload}.signature`
+
+  const { password: _pw, ...userWithoutPassword } = found
+  res.json({ token, user: userWithoutPassword })
+})
+
+/* ===========================================================================
+   System Sync Logs
+   =========================================================================== */
+
+/**
+ * GET /api/system/sync-logs
+ * Returns sync status for each primary supplier.
+ *
+ * The frontend Status page expects:
+ *   [{ supplier, lastSyncTime, rowsProcessed, errorsFlagged, status }]
+ */
+app.get('/api/system/sync-logs', (_req, res) => {
+  const now = Date.now()
+
+  const syncLogs = [
+    {
+      supplier: 'Booksite',
+      lastSyncTime: new Date(now - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+      rowsProcessed: 1247,
+      errorsFlagged: 0,
+      status: 'success',
+    },
+    {
+      supplier: 'Jonathan Ball',
+      lastSyncTime: new Date(now - 6 * 60 * 60 * 1000).toISOString(), // 6 hours ago
+      rowsProcessed: 834,
+      errorsFlagged: 3,
+      status: 'success',
+    },
+    {
+      supplier: 'Protea',
+      lastSyncTime: new Date(now - 48 * 60 * 60 * 1000).toISOString(), // 48 hours ago — will show as stale
+      rowsProcessed: 0,
+      errorsFlagged: 8,
+      status: 'failed',
+    },
+    {
+      supplier: 'Indie Authors',
+      lastSyncTime: new Date(now - 1 * 60 * 60 * 1000).toISOString(), // 1 hour ago
+      rowsProcessed: 23,
+      errorsFlagged: 0,
+      status: 'success',
+    },
+  ]
+
+  res.json(syncLogs)
+})
+
 function normalizeQuery(q) {
   return (q || '').toString().trim()
 }
