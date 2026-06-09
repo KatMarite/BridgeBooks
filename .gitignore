@@ -27,3 +27,15 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Python virtual environments
+venv/
+__pycache__/
+
+# FTPS pipeline — large data files
+backend/FTPS/**/downloads/
+backend/FTPS/**/normalized_output.csv
+
+# Email Ingestion pipeline — large data files
+backend/Email_Ingestion/**/downloads/
+backend/Email_Ingestion/**/normalized_output.csv

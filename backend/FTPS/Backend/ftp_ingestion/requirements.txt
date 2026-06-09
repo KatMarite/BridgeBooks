@@ -1,0 +1,4 @@
+# BridgeBooks FTPS Pipeline Dependencies
+python-dotenv
+psycopg2-binary
+pandas
