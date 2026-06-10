@@ -21,6 +21,10 @@ Usage:
 import requests
 import time
 import os
+from dotenv import load_dotenv
+
+# Load backend root .env file
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 GOOGLE_BOOKS_API = "https://www.googleapis.com/books/v1/volumes"
 
