@@ -1,8 +1,7 @@
 """
 email_download.py — Downloads the Protea stock file via IMAP Email.
 
-Connects to a mailbox, searches for emails from Protea containing
-stock updates, and downloads the attached CSV or Excel file.
+Logs the download event (success/failure) to the ingestion_events table.
 """
 
 import imaplib
@@ -11,7 +10,12 @@ from email.header import decode_header
 from pathlib import Path
 from dotenv import load_dotenv
 import os
+import sys
 import logging
+
+# Add backend root to path for shared utils
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from utils.ingestion_logger import IngestionLogger
 
 # ----------------------------
 # PATH SETUP
@@ -27,8 +31,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "protea_email.log"
 
 logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.INFO,
+    filename=LOG_FILE, level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
@@ -41,16 +44,21 @@ EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 IMAP_SERVER = os.getenv("IMAP_SERVER")
 
-# Optional filtering config
 PROTEA_SENDER = os.getenv("PROTEA_SENDER_EMAIL", "")
 SUBJECT_KEYWORD = os.getenv("PROTEA_SUBJECT_KEYWORD", "").lower()
 
+logger = IngestionLogger('protea', 'email_attachment')
+
 if not EMAIL_USER or not EMAIL_PASS or not IMAP_SERVER:
+    logger.start()
+    logger.add_error("Missing email credentials — .env not configured")
+    logger.finish('error', 'Email download failed: missing credentials')
     raise ValueError("Missing email credentials. Copy .env.example to .env and configure.")
 
 # ----------------------------
 # CONNECT TO MAILBOX
 # ----------------------------
+logger.start()
 print("🔄 Connecting to mailbox...")
 
 try:
@@ -61,19 +69,13 @@ try:
 
     mail.select("inbox")
 
-    # ----------------------------
-    # SEARCH EMAILS
-    # ----------------------------
-    # We search for ALL emails, but in a real production system you'd use:
-    # search_criteria = f'(FROM "{PROTEA_SENDER}" UNSEEN)' 
     status, messages = mail.search(None, 'ALL')
     email_ids = messages[0].split()
 
     print(f"📂 Total emails found in inbox: {len(email_ids)}")
     
-    # We'll only check the most recent 20 emails to save time
     recent_emails = email_ids[-20:]
-    recent_emails.reverse() # Newest first
+    recent_emails.reverse()
     
     downloaded_count = 0
     file_saved_path = None
@@ -85,17 +87,13 @@ try:
             if isinstance(response_part, tuple):
                 msg = email.message_from_bytes(response_part[1])
 
-                # Get Subject
                 subject, encoding = decode_header(msg.get("Subject", ""))[0]
                 if isinstance(subject, bytes):
                     subject = subject.decode(encoding if encoding else "utf-8", errors="ignore")
                 
-                # Get Sender
                 sender = msg.get("From", "")
 
-                # ----------------------------
-                # FILTERING
-                # ----------------------------
+                # Filtering
                 if PROTEA_SENDER and PROTEA_SENDER.lower() not in sender.lower():
                     continue
                 if SUBJECT_KEYWORD and SUBJECT_KEYWORD not in subject.lower():
@@ -103,9 +101,7 @@ try:
 
                 print(f"\n📧 Checking matching email: {subject}")
 
-                # ----------------------------
-                # ATTACHMENT EXTRACTION
-                # ----------------------------
+                # Attachment extraction
                 for part in msg.walk():
                     if part.get_content_maintype() == 'multipart':
                         continue
@@ -116,8 +112,8 @@ try:
                     if not filename:
                         continue
                     
-                    # Only download stock data files
                     if not filename.lower().endswith(('.csv', '.xlsx', '.xls')):
+                        logger.add_error(f"Skipped non-data attachment: {filename}")
                         continue
 
                     filepath = DOWNLOAD_DIR / filename
@@ -126,27 +122,40 @@ try:
 
                     downloaded_count += 1
                     file_saved_path = filepath
+                    logger.file_name = filename  # Update the logger with actual filename
                     print(f"   ⬇️ Downloaded: {filename}")
                     logging.info(f"Downloaded attachment: {filename} from {sender}")
         
-        # Stop after we find the newest matching stock file
         if downloaded_count > 0:
             break
 
     # ----------------------------
     # SUMMARY
     # ----------------------------
-    print("\n===== DOWNLOAD SUMMARY =====")
     if downloaded_count > 0:
-        print(f"✅ Downloaded newest Protea stock file: {file_saved_path.name}")
+        logger.add_processed()
+        logger.finish('success', f"Downloaded Protea stock file: {file_saved_path.name}")
     else:
-        print("⚠️ No matching emails with stock attachments found.")
+        logger.add_error("No matching emails with stock attachments found in inbox")
+        logger.finish('warning', "No Protea stock file found in recent emails")
 
     logging.info(f"Total attachments downloaded: {downloaded_count}")
-
     mail.logout()
 
+except imaplib.IMAP4.error as e:
+    logger.add_error(f"IMAP authentication failed: {e}")
+    logger.finish('error', f"Email download failed: authentication error")
+    logging.error(f"IMAP Error: {e}")
+    raise
+
+except ConnectionRefusedError as e:
+    logger.add_error(f"Cannot connect to mail server {IMAP_SERVER}: {e}")
+    logger.finish('error', f"Email download failed: mail server unreachable")
+    logging.error(f"Connection Error: {e}")
+    raise
+
 except Exception as e:
-    print("❌ Mailbox Error:", e)
+    logger.add_error(f"Unexpected email error: {e}")
+    logger.finish('error', f"Email download failed: {e}")
     logging.error(f"Mailbox Error: {e}")
     raise

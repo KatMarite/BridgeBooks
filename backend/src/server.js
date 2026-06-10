@@ -174,6 +174,8 @@ app.get('/api/books', async (req, res) => {
           b.author, 
           b.publication_date AS "publicationDate", 
           b.cover_image_url AS "coverImageUrl",
+          b.description,
+          b.page_count AS "pageCount",
           json_object_agg(
             sp.supplier_name,
             json_build_object(
@@ -218,6 +220,8 @@ app.get('/api/books/:id', async (req, res) => {
           b.author, 
           b.publication_date AS "publicationDate", 
           b.cover_image_url AS "coverImageUrl",
+          b.description,
+          b.page_count AS "pageCount",
           json_object_agg(
             sp.supplier_name,
             json_build_object(
@@ -246,191 +250,360 @@ app.get('/api/books/:id', async (req, res) => {
   res.json(book)
 })
 
+/**
+ * POST /api/books/:isbn/enrich
+ * Fetches metadata from Google Books API and updates the book record.
+ * Returns the updated book data.
+ */
+app.post('/api/books/:isbn/enrich', async (req, res) => {
+  const { isbn } = req.params
+
+  if (!isDbConnected) {
+    return res.status(503).json({ message: 'Database not available' })
+  }
+
+  try {
+    // 1. Verify book exists
+    const bookCheck = await query('SELECT isbn_13 FROM books WHERE isbn_13 = $1', [isbn])
+    if (bookCheck.rows.length === 0) {
+      return res.status(404).json({ message: 'Book not found' })
+    }
+
+    // 2. Call Google Books API (Node 24 has built-in fetch)
+    const apiUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`
+    const apiRes = await fetch(apiUrl, { signal: AbortSignal.timeout(10000) })
+    
+    if (apiRes.status === 429) {
+      return res.status(429).json({ message: 'Google Books API rate limit exceeded. Please try again later.' })
+    }
+    
+    if (!apiRes.ok) {
+        return res.status(apiRes.status).json({ message: `Google Books API error: ${apiRes.statusText}` })
+    }
+
+    const apiData = await apiRes.json()
+
+    if (!apiData.totalItems || apiData.totalItems === 0) {
+      return res.json({ enriched: false, message: 'ISBN not found on Google Books' })
+    }
+
+    const vol = apiData.items[0].volumeInfo
+    const imageLinks = vol.imageLinks || {}
+    let coverUrl = imageLinks.thumbnail || imageLinks.smallThumbnail || null
+    if (coverUrl && coverUrl.startsWith('http://')) {
+      coverUrl = coverUrl.replace('http://', 'https://')
+    }
+
+    // 3. Update the book record (only fill gaps, never overwrite supplier data)
+    await query(
+      `UPDATE books SET
+         description = COALESCE(NULLIF(description, ''), $1),
+         cover_image_url = COALESCE(NULLIF(cover_image_url, ''), $2),
+         page_count = COALESCE(page_count, $3),
+         updated_at = NOW()
+       WHERE isbn_13 = $4`,
+      [vol.description || null, coverUrl, vol.pageCount || null, isbn]
+    )
+
+    return res.json({
+      enriched: true,
+      data: {
+        description: vol.description || null,
+        coverImageUrl: coverUrl,
+        pageCount: vol.pageCount || null,
+        categories: vol.categories || [],
+      },
+    })
+  } catch (err) {
+    console.error('Enrichment error:', err)
+    return res.status(500).json({ message: 'Enrichment failed', error: err.message })
+  }
+})
+
 /* ===========================================================================
-   Dashboard Mock Data & Endpoints
+   System Sync Logs — used by the Status page
    =========================================================================== */
 
-const SUPPLIERS = [
-  'Penguin Random House',
-  'HarperCollins',
-  'Simon & Schuster',
-  'Hachette Book Group',
-  'Macmillan Publishers',
-  'Scholastic',
-  'Oxford University Press',
-  'Cambridge University Press',
-]
+/**
+ * GET /api/system/sync-logs
+ * Returns the latest sync status for each supplier pipeline.
+ * The Status page expects: { supplier, lastSyncTime, status, rowsProcessed, errorsFlagged }
+ */
+app.get('/api/system/sync-logs', async (_req, res) => {
+  if (isDbConnected) {
+    try {
+      // Get the latest ingestion event for each supplier
+      const result = await query(
+        `SELECT DISTINCT ON (supplier_name)
+           supplier_name,
+           completed_at,
+           status,
+           records_processed,
+           errors_count
+         FROM ingestion_events
+         ORDER BY supplier_name, completed_at DESC`
+      )
 
-const ERROR_MESSAGES = [
-  'Corrupt CSV file — unable to parse beyond row 142',
-  'Mismatched column headers — expected 12 columns, found 9',
-  'Duplicate ISBN detected: 978-0-13-468599-1 already exists in catalogue',
-  'Invalid price format in column "retail_price" — non-numeric value found',
-  'File encoding error — expected UTF-8 but detected ISO-8859-1',
-  'Missing required field "title" in 23 rows',
-  'Publication date format invalid — expected YYYY-MM-DD, got DD/MM/YYYY',
-  'File size exceeds 50 MB limit (received 72.4 MB)',
-]
+      // Map supplier_name to the display names the frontend expects
+      const supplierDisplayNames = {
+        booksite: 'Booksite',
+        jonathanBall: 'Jonathan Ball',
+        protea: 'Protea',
+      }
 
-const FILE_EXTENSIONS = ['.csv', '.xlsx', '.xml', '.json']
+      const logs = result.rows.map((row) => ({
+        supplier: supplierDisplayNames[row.supplier_name] || row.supplier_name,
+        lastSyncTime: row.completed_at,
+        status: row.status === 'error' ? 'failed' : row.status,
+        rowsProcessed: row.records_processed,
+        errorsFlagged: row.errors_count,
+      }))
 
-/** Generate a deterministic-ish timestamp string based on offset */
-function makeTimestamp(hoursAgo) {
-  const d = new Date(Date.now() - hoursAgo * 60 * 60 * 1000)
-  return d.toISOString()
-}
+      // Add Indie Authors entry (no pipeline — manual submissions only)
+      logs.push({
+        supplier: 'Indie Authors',
+        lastSyncTime: null,
+        status: 'manual',
+        rowsProcessed: 0,
+        errorsFlagged: 0,
+      })
 
-/** Pick a random item from an array */
-function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)]
-}
-
-/** Generate a supplier filename */
-function makeFilename(supplier) {
-  const slug = supplier.toLowerCase().replace(/[^a-z0-9]+/g, '_')
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const ext = pick(FILE_EXTENSIONS)
-  return `${slug}_catalogue_${date}${ext}`
-}
-
-// ---------- In-memory error store (for resolve / delete) ----------
-
-let nextErrorId = 1
-
-function generateErrors(range) {
-  const count = range === 'week' ? 6 : range === 'yesterday' ? 3 : 2
-  const errors = []
-  for (let i = 0; i < count; i++) {
-    const supplier = pick(SUPPLIERS)
-    errors.push({
-      id: String(nextErrorId++),
-      timestamp: makeTimestamp(Math.random() * (range === 'week' ? 168 : 24)),
-      supplier,
-      fileName: makeFilename(supplier),
-      message: pick(ERROR_MESSAGES),
-      resolved: false,
-    })
+      return res.json(logs)
+    } catch (err) {
+      console.error('Sync logs DB error:', err)
+    }
   }
-  return errors
-}
 
-// Keep a persistent error list so resolve/delete works within a session
-let currentErrors = generateErrors('today')
+  // Fallback: no data
+  res.json([])
+})
+
+/* ===========================================================================
+   Dashboard Endpoints (PostgreSQL-backed via ingestion_events/ingestion_errors)
+   =========================================================================== */
+
+/**
+ * Helper: compute a date range filter cutoff based on the `range` query param.
+ */
+function getRangeCutoff(range) {
+  const now = new Date()
+  if (range === 'week') return new Date(now - 7 * 24 * 60 * 60 * 1000)
+  if (range === 'yesterday') {
+    const y = new Date(now)
+    y.setDate(y.getDate() - 1)
+    y.setHours(0, 0, 0, 0)
+    return y
+  }
+  // 'today' — midnight of the current day
+  const t = new Date(now)
+  t.setHours(0, 0, 0, 0)
+  return t
+}
 
 /**
  * GET /api/dashboard/summary?range=today|yesterday|week
+ * Returns real KPI counts from ingestion_events.
  */
-app.get('/api/dashboard/summary', (req, res) => {
+app.get('/api/dashboard/summary', async (req, res) => {
   const range = (req.query.range || 'today').toLowerCase()
 
-  const multiplier = range === 'week' ? 7 : range === 'yesterday' ? 1 : 1
-  const baseFiles = range === 'yesterday' ? 14 : 18
+  if (isDbConnected) {
+    try {
+      const cutoff = getRangeCutoff(range)
 
-  const unresolvedErrors = currentErrors.filter((e) => !e.resolved).length
+      const summaryResult = await query(
+        `SELECT
+           COUNT(*)::int                                   AS "filesReceived",
+           COALESCE(SUM(records_inserted), 0)::int         AS "newIsbnsAdded",
+           COALESCE(SUM(records_updated), 0)::int          AS "metadataUpdates",
+           MAX(completed_at)                               AS "lastUpdated"
+         FROM ingestion_events
+         WHERE completed_at >= $1`,
+        [cutoff]
+      )
 
+      const errResult = await query(
+        `SELECT COUNT(*)::int AS count
+         FROM ingestion_errors
+         WHERE resolved = false AND created_at >= $1`,
+        [cutoff]
+      )
+
+      const row = summaryResult.rows[0]
+      return res.json({
+        range,
+        filesReceived: row.filesReceived || 0,
+        newIsbnsAdded: row.newIsbnsAdded || 0,
+        metadataUpdates: row.metadataUpdates || 0,
+        totalErrors: errResult.rows[0].count || 0,
+        lastUpdated: row.lastUpdated || new Date().toISOString(),
+      })
+    } catch (err) {
+      console.error('Dashboard summary DB error:', err)
+    }
+  }
+
+  // Fallback: empty summary
   res.json({
     range,
-    filesReceived: baseFiles * multiplier + Math.floor(Math.random() * 5),
-    newIsbnsAdded: Math.floor((42 + Math.random() * 20) * multiplier),
-    metadataUpdates: Math.floor((187 + Math.random() * 60) * multiplier),
-    totalErrors: unresolvedErrors,
+    filesReceived: 0,
+    newIsbnsAdded: 0,
+    metadataUpdates: 0,
+    totalErrors: 0,
     lastUpdated: new Date().toISOString(),
   })
 })
 
 /**
  * GET /api/dashboard/activity?range=today|yesterday|week
+ * Returns real pipeline run events.
  */
-app.get('/api/dashboard/activity', (req, res) => {
+app.get('/api/dashboard/activity', async (req, res) => {
   const range = (req.query.range || 'today').toLowerCase()
-  const count = range === 'week' ? 20 : range === 'yesterday' ? 10 : 8
 
-  const statuses = ['success', 'success', 'success', 'success', 'warning', 'error']
+  if (isDbConnected) {
+    try {
+      const cutoff = getRangeCutoff(range)
 
-  const activities = []
-  for (let i = 0; i < count; i++) {
-    const supplier = pick(SUPPLIERS)
-    const status = pick(statuses)
-    const hoursAgo = Math.random() * (range === 'week' ? 168 : 24)
+      const result = await query(
+        `SELECT
+           id,
+           completed_at   AS timestamp,
+           supplier_name  AS supplier,
+           file_name      AS "fileName",
+           status,
+           records_processed AS "recordsProcessed",
+           message
+         FROM ingestion_events
+         WHERE completed_at >= $1
+         ORDER BY completed_at DESC
+         LIMIT 50`,
+        [cutoff]
+      )
 
-    activities.push({
-      id: `act-${Date.now()}-${i}`,
-      timestamp: makeTimestamp(hoursAgo),
-      supplier,
-      fileName: makeFilename(supplier),
-      status,
-      recordsProcessed: status !== 'error' ? Math.floor(50 + Math.random() * 500) : 0,
-      message:
-        status === 'success'
-          ? 'File processed successfully'
-          : status === 'warning'
-            ? 'Processed with minor warnings'
-            : 'Processing failed — see error log',
-    })
+      return res.json(result.rows.map((r) => ({ ...r, id: String(r.id) })))
+    } catch (err) {
+      console.error('Dashboard activity DB error:', err)
+    }
   }
 
-  // Sort newest first
-  activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-
-  res.json(activities)
+  res.json([])
 })
 
 /**
  * GET /api/dashboard/errors?range=today|yesterday|week
+ * Returns real ingestion errors from the database.
  */
-app.get('/api/dashboard/errors', (_req, res) => {
-  // Return current persistent errors
-  res.json(currentErrors)
+app.get('/api/dashboard/errors', async (req, res) => {
+  if (isDbConnected) {
+    try {
+      const result = await query(
+        `SELECT
+           e.id,
+           e.created_at   AS timestamp,
+           e.supplier_name AS supplier,
+           e.file_name     AS "fileName",
+           e.message,
+           e.resolved
+         FROM ingestion_errors e
+         ORDER BY e.created_at DESC
+         LIMIT 100`
+      )
+      return res.json(result.rows.map((r) => ({ ...r, id: String(r.id) })))
+    } catch (err) {
+      console.error('Dashboard errors DB error:', err)
+    }
+  }
+  res.json([])
 })
 
 /**
  * POST /api/dashboard/errors/:id/resolve
  */
-app.post('/api/dashboard/errors/:id/resolve', (req, res) => {
-  const err = currentErrors.find((e) => e.id === req.params.id)
-  if (!err) return res.status(404).json({ message: 'Error not found' })
-
-  err.resolved = true
-  res.json({ success: true, error: err })
+app.post('/api/dashboard/errors/:id/resolve', async (req, res) => {
+  if (isDbConnected) {
+    try {
+      const result = await query(
+        'UPDATE ingestion_errors SET resolved = true WHERE id = $1 RETURNING *',
+        [req.params.id]
+      )
+      if (result.rowCount === 0) return res.status(404).json({ message: 'Error not found' })
+      const row = result.rows[0]
+      return res.json({
+        success: true,
+        error: { id: String(row.id), timestamp: row.created_at, supplier: row.supplier_name, fileName: row.file_name, message: row.message, resolved: row.resolved },
+      })
+    } catch (err) {
+      console.error('Error resolving:', err)
+      return res.status(500).json({ message: 'Database error' })
+    }
+  }
+  res.status(503).json({ message: 'Database not available' })
 })
 
 /**
  * DELETE /api/dashboard/errors/:id
  */
-app.delete('/api/dashboard/errors/:id', (req, res) => {
-  const idx = currentErrors.findIndex((e) => e.id === req.params.id)
-  if (idx === -1) return res.status(404).json({ message: 'Error not found' })
-
-  currentErrors.splice(idx, 1)
-  res.json({ success: true })
+app.delete('/api/dashboard/errors/:id', async (req, res) => {
+  if (isDbConnected) {
+    try {
+      const result = await query('DELETE FROM ingestion_errors WHERE id = $1 RETURNING id', [req.params.id])
+      if (result.rowCount === 0) return res.status(404).json({ message: 'Error not found' })
+      return res.json({ success: true })
+    } catch (err) {
+      console.error('Error deleting:', err)
+      return res.status(500).json({ message: 'Database error' })
+    }
+  }
+  res.status(503).json({ message: 'Database not available' })
 })
 
 /**
  * POST /api/dashboard/errors/clear
  * Clears all resolved errors (or all errors if ?all=true)
  */
-app.post('/api/dashboard/errors/clear', (req, res) => {
-  if (req.query.all === 'true') {
-    currentErrors = []
-  } else {
-    currentErrors = currentErrors.filter((e) => !e.resolved)
+app.post('/api/dashboard/errors/clear', async (req, res) => {
+  if (isDbConnected) {
+    try {
+      if (req.query.all === 'true') {
+        await query('DELETE FROM ingestion_errors')
+      } else {
+        await query('DELETE FROM ingestion_errors WHERE resolved = true')
+      }
+      const remaining = await query('SELECT COUNT(*)::int AS count FROM ingestion_errors')
+      return res.json({ success: true, remaining: remaining.rows[0].count })
+    } catch (err) {
+      console.error('Error clearing:', err)
+      return res.status(500).json({ message: 'Database error' })
+    }
   }
-  res.json({ success: true, remaining: currentErrors.length })
+  res.status(503).json({ message: 'Database not available' })
 })
 
 /* ===========================================================================
-   Price Override Endpoints
+   Price Override Endpoints (PostgreSQL-backed)
    =========================================================================== */
-
-let priceOverrides = []
-let nextOverrideId = 1
 
 /**
  * GET /api/price-overrides
  * Returns all active price overrides.
  */
-app.get('/api/price-overrides', (_req, res) => {
-  res.json(priceOverrides)
+app.get('/api/price-overrides', async (_req, res) => {
+  if (isDbConnected) {
+    try {
+      const result = await query(
+        `SELECT id, isbn_13 AS isbn, isbn_13 AS "bookId", title, author,
+                original_price AS "originalPrice", override_price AS "overridePrice",
+                reason, notes, created_by AS "createdBy",
+                created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM price_overrides ORDER BY created_at DESC`
+      )
+      return res.json(result.rows)
+    } catch (err) {
+      console.error('DB error fetching overrides:', err)
+    }
+  }
+  res.json([])
 })
 
 /**
@@ -438,64 +611,63 @@ app.get('/api/price-overrides', (_req, res) => {
  * Create or update a price override.
  * Body: { bookId, isbn, title, author, originalPrice?, overridePrice, reason, notes? }
  */
-app.post('/api/price-overrides', (req, res) => {
+app.post('/api/price-overrides', async (req, res) => {
   const { bookId, isbn, title, author, originalPrice, overridePrice, reason, notes } = req.body
 
   if (!overridePrice || !reason) {
     return res.status(400).json({ message: 'overridePrice and reason are required' })
   }
 
-  // Check if an override already exists for this book
-  const existing = priceOverrides.find(
-    (o) => (bookId && o.bookId === bookId) || (isbn && o.isbn === isbn)
-  )
+  const isbnKey = isbn || bookId
 
-  if (existing) {
-    // Update existing override
-    existing.overridePrice = Number(overridePrice)
-    existing.reason = reason
-    existing.notes = notes || ''
-    existing.updatedAt = new Date().toISOString()
-    return res.json({ success: true, override: existing })
+  if (isDbConnected) {
+    try {
+      const result = await query(
+        `INSERT INTO price_overrides (isbn_13, title, author, original_price, override_price, reason, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (isbn_13) DO UPDATE SET
+           override_price = EXCLUDED.override_price,
+           reason = EXCLUDED.reason,
+           notes = EXCLUDED.notes,
+           updated_at = NOW()
+         RETURNING id, isbn_13 AS isbn, isbn_13 AS "bookId", title, author,
+                   original_price AS "originalPrice", override_price AS "overridePrice",
+                   reason, notes, created_at AS "createdAt", updated_at AS "updatedAt"`,
+        [isbnKey, title || 'Unknown', author || '', originalPrice || null, Number(overridePrice), reason, notes || '']
+      )
+      return res.status(201).json({ success: true, override: result.rows[0] })
+    } catch (err) {
+      console.error('DB error creating override:', err)
+      return res.status(500).json({ message: 'Database error' })
+    }
   }
-
-  const override = {
-    id: `po-${nextOverrideId++}`,
-    bookId: bookId || isbn || `manual-${Date.now()}`,
-    isbn: isbn || '',
-    title: title || 'Unknown Title',
-    author: author || '',
-    originalPrice: originalPrice != null ? Number(originalPrice) : null,
-    overridePrice: Number(overridePrice),
-    reason,
-    notes: notes || '',
-    createdAt: new Date().toISOString(),
-    createdBy: 'staff@bridgebooks.co.za',
-  }
-
-  priceOverrides.push(override)
-  res.status(201).json({ success: true, override })
+  res.status(503).json({ message: 'Database not available' })
 })
 
 /**
  * DELETE /api/price-overrides/:id
  * Remove a price override.
  */
-app.delete('/api/price-overrides/:id', (req, res) => {
-  const idx = priceOverrides.findIndex((o) => o.id === req.params.id)
-  if (idx === -1) return res.status(404).json({ message: 'Override not found' })
-
-  priceOverrides.splice(idx, 1)
-  res.json({ success: true })
+app.delete('/api/price-overrides/:id', async (req, res) => {
+  if (isDbConnected) {
+    try {
+      const result = await query('DELETE FROM price_overrides WHERE id = $1 RETURNING id', [req.params.id])
+      if (result.rowCount === 0) return res.status(404).json({ message: 'Override not found' })
+      return res.json({ success: true })
+    } catch (err) {
+      console.error('DB error deleting override:', err)
+      return res.status(500).json({ message: 'Database error' })
+    }
+  }
+  res.status(503).json({ message: 'Database not available' })
 })
 
 /* ===========================================================================
-   Indie Submissions Review Queue
+   Indie Submissions Review Queue (PostgreSQL-backed)
    =========================================================================== */
 
-let nextSubmissionId = 11
-
-const indieSubmissions = [
+// In-memory fallback data (used only when DB is not connected)
+const FALLBACK_SUBMISSIONS = [
   {
     id: 'sub-1',
     title: 'The Karoo Dreamweaver',
@@ -648,37 +820,64 @@ const indieSubmissions = [
   },
 ]
 
+// Helper to map DB rows to the camelCase shape the frontend expects
+function mapSubmissionRow(row) {
+  return {
+    id: String(row.id),
+    title: row.title,
+    authorName: row.author_name,
+    authorEmail: row.author_email,
+    synopsis: row.synopsis,
+    pageCount: row.page_count,
+    suggestedPrice: row.suggested_price ? Number(row.suggested_price) : null,
+    coverImageUrl: row.cover_image_url || '',
+    submissionDate: row.submission_date,
+    status: row.status,
+    reviewedBy: row.reviewed_by,
+    reviewedAt: row.reviewed_at,
+    rejectionReason: row.rejection_reason,
+  }
+}
+
 /**
  * GET /api/indie-submissions
  * Query params: status, search, sort (oldest|newest)
  */
-app.get('/api/indie-submissions', (req, res) => {
-  let results = [...indieSubmissions]
-
-  // Filter by status
+app.get('/api/indie-submissions', async (req, res) => {
   const status = (req.query.status || '').toLowerCase()
-  if (status && status !== 'all') {
-    results = results.filter((s) => s.status === status)
-  }
-
-  // Search by title or author name
   const search = (req.query.search || '').trim().toLowerCase()
-  if (search) {
-    results = results.filter(
-      (s) =>
-        s.title.toLowerCase().includes(search) ||
-        s.authorName.toLowerCase().includes(search)
-    )
+  const sort = (req.query.sort || 'newest').toLowerCase()
+
+  if (isDbConnected) {
+    try {
+      let sql = 'SELECT * FROM indie_submissions WHERE 1=1'
+      const params = []
+      let paramIdx = 1
+
+      if (status && status !== 'all') {
+        sql += ` AND status = $${paramIdx++}`
+        params.push(status)
+      }
+      if (search) {
+        sql += ` AND (title ILIKE $${paramIdx} OR author_name ILIKE $${paramIdx})`
+        params.push(`%${search}%`)
+        paramIdx++
+      }
+
+      sql += sort === 'oldest' ? ' ORDER BY submission_date ASC' : ' ORDER BY submission_date DESC'
+
+      const result = await query(sql, params)
+      return res.json(result.rows.map(mapSubmissionRow))
+    } catch (err) {
+      console.error('DB error fetching submissions:', err)
+    }
   }
 
-  // Sort by submission date
-  const sort = (req.query.sort || 'newest').toLowerCase()
-  results.sort((a, b) => {
-    const da = new Date(a.submissionDate)
-    const db = new Date(b.submissionDate)
-    return sort === 'oldest' ? da - db : db - da
-  })
-
+  // Fallback to in-memory
+  let results = [...FALLBACK_SUBMISSIONS]
+  if (status && status !== 'all') results = results.filter((s) => s.status === status)
+  if (search) results = results.filter((s) => s.title.toLowerCase().includes(search) || s.authorName.toLowerCase().includes(search))
+  results.sort((a, b) => sort === 'oldest' ? new Date(a.submissionDate) - new Date(b.submissionDate) : new Date(b.submissionDate) - new Date(a.submissionDate))
   res.json(results)
 })
 
@@ -686,16 +885,33 @@ app.get('/api/indie-submissions', (req, res) => {
  * GET /api/indie-submissions/count
  * Returns { pending: N }
  */
-app.get('/api/indie-submissions/count', (_req, res) => {
-  const pending = indieSubmissions.filter((s) => s.status === 'pending').length
+app.get('/api/indie-submissions/count', async (_req, res) => {
+  if (isDbConnected) {
+    try {
+      const result = await query("SELECT COUNT(*) AS count FROM indie_submissions WHERE status = 'pending'")
+      return res.json({ pending: Number(result.rows[0].count) })
+    } catch (err) {
+      console.error('DB error counting submissions:', err)
+    }
+  }
+  const pending = FALLBACK_SUBMISSIONS.filter((s) => s.status === 'pending').length
   res.json({ pending })
 })
 
 /**
  * GET /api/indie-submissions/:id
  */
-app.get('/api/indie-submissions/:id', (req, res) => {
-  const sub = indieSubmissions.find((s) => s.id === req.params.id)
+app.get('/api/indie-submissions/:id', async (req, res) => {
+  if (isDbConnected) {
+    try {
+      const result = await query('SELECT * FROM indie_submissions WHERE id = $1', [req.params.id])
+      if (result.rows.length === 0) return res.status(404).json({ message: 'Submission not found' })
+      return res.json(mapSubmissionRow(result.rows[0]))
+    } catch (err) {
+      console.error('DB error fetching submission:', err)
+    }
+  }
+  const sub = FALLBACK_SUBMISSIONS.find((s) => s.id === req.params.id)
   if (!sub) return res.status(404).json({ message: 'Submission not found' })
   res.json(sub)
 })
@@ -704,44 +920,60 @@ app.get('/api/indie-submissions/:id', (req, res) => {
  * POST /api/indie-submissions/:id/approve
  * Body: { reviewedBy }
  */
-app.post('/api/indie-submissions/:id/approve', (req, res) => {
-  const sub = indieSubmissions.find((s) => s.id === req.params.id)
-  if (!sub) return res.status(404).json({ message: 'Submission not found' })
-
-  if (sub.status !== 'pending') {
-    return res.status(400).json({ message: `Cannot approve a submission with status "${sub.status}"` })
+app.post('/api/indie-submissions/:id/approve', async (req, res) => {
+  if (isDbConnected) {
+    try {
+      const result = await query(
+        `UPDATE indie_submissions
+         SET status = 'approved', reviewed_by = $2, reviewed_at = NOW(), rejection_reason = NULL
+         WHERE id = $1 AND status = 'pending'
+         RETURNING *`,
+        [req.params.id, req.body.reviewedBy || 'Unknown']
+      )
+      if (result.rowCount === 0) {
+        const exists = await query('SELECT status FROM indie_submissions WHERE id = $1', [req.params.id])
+        if (exists.rows.length === 0) return res.status(404).json({ message: 'Submission not found' })
+        return res.status(400).json({ message: `Cannot approve a submission with status "${exists.rows[0].status}"` })
+      }
+      return res.json({ success: true, submission: mapSubmissionRow(result.rows[0]) })
+    } catch (err) {
+      console.error('DB error approving:', err)
+      return res.status(500).json({ message: 'Database error' })
+    }
   }
-
-  sub.status = 'approved'
-  sub.reviewedBy = req.body.reviewedBy || 'Unknown'
-  sub.reviewedAt = new Date().toISOString()
-  sub.rejectionReason = null
-
-  res.json({ success: true, submission: sub })
+  res.status(503).json({ message: 'Database not available' })
 })
 
 /**
  * POST /api/indie-submissions/:id/reject
  * Body: { reviewedBy, rejectionReason }
  */
-app.post('/api/indie-submissions/:id/reject', (req, res) => {
-  const sub = indieSubmissions.find((s) => s.id === req.params.id)
-  if (!sub) return res.status(404).json({ message: 'Submission not found' })
-
-  if (sub.status !== 'pending') {
-    return res.status(400).json({ message: `Cannot reject a submission with status "${sub.status}"` })
-  }
-
+app.post('/api/indie-submissions/:id/reject', async (req, res) => {
   if (!req.body.rejectionReason || !req.body.rejectionReason.trim()) {
     return res.status(400).json({ message: 'A rejection reason is required' })
   }
 
-  sub.status = 'rejected'
-  sub.reviewedBy = req.body.reviewedBy || 'Unknown'
-  sub.reviewedAt = new Date().toISOString()
-  sub.rejectionReason = req.body.rejectionReason.trim()
-
-  res.json({ success: true, submission: sub })
+  if (isDbConnected) {
+    try {
+      const result = await query(
+        `UPDATE indie_submissions
+         SET status = 'rejected', reviewed_by = $2, reviewed_at = NOW(), rejection_reason = $3
+         WHERE id = $1 AND status = 'pending'
+         RETURNING *`,
+        [req.params.id, req.body.reviewedBy || 'Unknown', req.body.rejectionReason.trim()]
+      )
+      if (result.rowCount === 0) {
+        const exists = await query('SELECT status FROM indie_submissions WHERE id = $1', [req.params.id])
+        if (exists.rows.length === 0) return res.status(404).json({ message: 'Submission not found' })
+        return res.status(400).json({ message: `Cannot reject a submission with status "${exists.rows[0].status}"` })
+      }
+      return res.json({ success: true, submission: mapSubmissionRow(result.rows[0]) })
+    } catch (err) {
+      console.error('DB error rejecting:', err)
+      return res.status(500).json({ message: 'Database error' })
+    }
+  }
+  res.status(503).json({ message: 'Database not available' })
 })
 
 const PORT = Number(process.env.PORT) || 3001

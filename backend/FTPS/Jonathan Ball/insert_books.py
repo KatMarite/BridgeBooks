@@ -11,8 +11,13 @@ Uses ON CONFLICT to safely handle re-imports without duplicating data.
 import pandas as pd
 import psycopg2
 import os
+import sys
 from dotenv import load_dotenv
 from pathlib import Path
+
+# Add backend root to path for shared utils
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from utils.ingestion_logger import IngestionLogger
 
 # ----------------------------
 # CONFIG
@@ -74,18 +79,18 @@ ON CONFLICT (isbn_13, supplier_name) DO UPDATE SET
 # ----------------------------
 # PROCESS ROWS
 # ----------------------------
+logger = IngestionLogger('jonathanBall', CSV_FILE.name)
+logger.start()
+
 books_upserted = 0
 prices_upserted = 0
-errors = 0
 
 for _, row in df.iterrows():
     try:
-        # Parse publication_date safely
         pub_date = row.get("publication_date", None)
         if pd.isna(pub_date) or pub_date == "":
             pub_date = None
 
-        # 1. Upsert book metadata
         cur.execute(books_query, (
             row["isbn_13"],
             row.get("title", "Unknown"),
@@ -94,8 +99,8 @@ for _, row in df.iterrows():
             pub_date,
         ))
         books_upserted += 1
+        logger.add_inserted()
 
-        # 2. Upsert supplier pricing (tagged as jonathanBall)
         cur.execute(prices_query, (
             row["isbn_13"],
             row.get("supplier_name", "jonathanBall"),
@@ -105,18 +110,17 @@ for _, row in df.iterrows():
         prices_upserted += 1
 
     except Exception as e:
-        errors += 1
-        if errors <= 5:
-            print(f"  ⚠️  Row error (ISBN {row.get('isbn_13', '?')}): {e}")
+        logger.add_error(f"ISBN {row.get('isbn_13', '?')}: {e}")
         conn.rollback()
         continue
+    finally:
+        logger.add_processed()
 
 conn.commit()
 cur.close()
 conn.close()
 
-print(f"\n✅ Jonathan Ball import complete!")
-print(f"   Books upserted:    {books_upserted}")
-print(f"   Prices upserted:   {prices_upserted}")
-if errors:
-    print(f"   ⚠️  Errors skipped: {errors}")
+logger.finish(
+    status='success',
+    message=f"Jonathan Ball import: {books_upserted} books, {prices_upserted} prices upserted"
+)

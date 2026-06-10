@@ -140,6 +140,17 @@ export async function fetchSystemSyncLogs() {
   return request('/system/sync-logs')
 }
 
+/* ============ Book Enrichment ============ */
+
+/**
+ * Trigger Google Books API enrichment for a single book.
+ * @param {string} isbn - ISBN-13 to enrich.
+ * @returns {{ enriched: boolean, data?: object, message?: string }}
+ */
+export async function enrichBook(isbn) {
+  return request(`/books/${isbn}/enrich`, { method: 'POST' })
+}
+
 /* ============ Price Overrides ============ */
 
 /**

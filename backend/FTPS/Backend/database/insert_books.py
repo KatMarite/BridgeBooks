@@ -11,7 +11,12 @@ Uses ON CONFLICT to safely handle re-imports without duplicating data.
 import pandas as pd
 import psycopg2
 import os
+import sys
 from dotenv import load_dotenv
+
+# Add backend root to path for shared utils
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+from utils.ingestion_logger import IngestionLogger
 
 # ----------------------------
 # CONFIG
@@ -76,9 +81,11 @@ ON CONFLICT (isbn_13, supplier_name) DO UPDATE SET
 # ----------------------------
 # PROCESS ROWS
 # ----------------------------
+logger = IngestionLogger('booksite', os.path.basename(CSV_FILE))
+logger.start()
+
 books_inserted = 0
 prices_inserted = 0
-errors = 0
 
 for _, row in df.iterrows():
     try:
@@ -91,6 +98,7 @@ for _, row in df.iterrows():
             row.get("publication_date", None),
         ))
         books_inserted += 1
+        logger.add_inserted()
 
         # 2. Upsert supplier pricing
         cur.execute(prices_query, (
@@ -101,18 +109,17 @@ for _, row in df.iterrows():
         ))
         prices_inserted += 1
     except Exception as e:
-        errors += 1
-        if errors <= 5:
-            print(f"  ⚠️  Row error (ISBN {row.get('isbn_13', '?')}): {e}")
+        logger.add_error(f"ISBN {row.get('isbn_13', '?')}: {e}")
         conn.rollback()
         continue
+    finally:
+        logger.add_processed()
 
 conn.commit()
 cur.close()
 conn.close()
 
-print(f"✅ Insert complete!")
-print(f"   Books upserted:    {books_inserted}")
-print(f"   Prices upserted:   {prices_inserted}")
-if errors:
-    print(f"   ⚠️  Errors skipped: {errors}")
+logger.finish(
+    status='success',
+    message=f"Booksite import: {books_inserted} books, {prices_inserted} prices upserted"
+)
