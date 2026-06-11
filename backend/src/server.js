@@ -2,10 +2,13 @@ import express from 'express'
 import cors from 'cors'
 import { BOOKS } from './data/books.js'
 import { connectDb, isDbConnected, query } from './db.js'
+import { verifyShopifyWebhook } from './middleware/shopifyAuth.js'
 
 const app = express()
 
 app.use(cors())
+// Webhooks require raw body for HMAC signature verification
+app.use('/api/webhooks/shopify', express.raw({ type: 'application/json' }))
 app.use(express.json())
 
 app.get('/api/health', (_req, res) => {
@@ -974,6 +977,71 @@ app.post('/api/indie-submissions/:id/reject', async (req, res) => {
     }
   }
   res.status(503).json({ message: 'Database not available' })
+})
+
+/* ===========================================================================
+   Shopify Webhooks
+   =========================================================================== */
+
+app.post('/api/webhooks/shopify/orders', verifyShopifyWebhook, async (req, res) => {
+  // Acknowledge receipt quickly (Shopify requires a 200 OK fast)
+  res.status(200).send('OK')
+  
+  const order = req.bodyData // parsed in the middleware
+  if (!order || !order.line_items) return
+
+  console.log(`[Webhook] New Shopify Order received: ${order.name || order.id}`)
+
+  if (!isDbConnected) {
+    console.error('[Webhook] DB disconnected. Cannot process order.')
+    return
+  }
+
+  try {
+    for (const item of order.line_items) {
+      const isbn = item.sku
+      if (!isbn) continue
+
+      // Check local stock
+      const result = await query(
+        `SELECT b.title, COALESCE(SUM(sp.stock_quantity), 0) AS total_stock,
+                MAX(sp.supplier_name) AS supplier_name
+         FROM books b
+         LEFT JOIN supplier_prices sp ON b.isbn_13 = sp.isbn_13
+         WHERE b.isbn_13 = $1
+         GROUP BY b.isbn_13`,
+        [isbn]
+      )
+
+      if (result.rows.length === 0) continue // Book not in our DB
+      const bookData = result.rows[0]
+
+      if (Number(bookData.total_stock) === 0) {
+        // Book is sold but we have 0 stock locally (Order on Request scenario)
+        const customerName = order.customer 
+          ? `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() 
+          : 'Unknown Customer'
+          
+        await query(
+          `INSERT INTO pending_orders 
+            (shopify_order_id, shopify_order_number, isbn_13, title, supplier_name, customer_name, quantity, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')`,
+          [
+            order.id.toString(), 
+            order.name || order.order_number, 
+            isbn, 
+            bookData.title || item.title, 
+            bookData.supplier_name || 'Unknown',
+            customerName || 'Unknown Customer',
+            item.quantity || 1
+          ]
+        )
+        console.log(`[Webhook] Created pending order alert for ISBN ${isbn}`)
+      }
+    }
+  } catch (err) {
+    console.error('[Webhook] Error processing order:', err)
+  }
 })
 
 const PORT = Number(process.env.PORT) || 3001
