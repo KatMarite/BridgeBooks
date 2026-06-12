@@ -254,3 +254,28 @@ export async function rejectIndieSubmission(id, data) {
     body: JSON.stringify(data),
   })
 }
+
+/* ============ ONIX Export ============ */
+
+/**
+ * Trigger ONIX 3.0 export download.
+ * Returns a Blob.
+ */
+export async function exportOnixCatalogue() {
+  const token = localStorage.getItem('token')
+  const headers = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const response = await fetch(`${BASE_URL}/export/onix`, { headers })
+  if (!response.ok) {
+    let msg = 'Export failed'
+    try {
+      const errData = await response.json()
+      msg = errData.message || msg
+    } catch {
+      // ignore
+    }
+    throw new Error(msg)
+  }
+  return response.blob()
+}

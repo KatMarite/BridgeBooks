@@ -980,6 +980,77 @@ app.post('/api/system/sync-shopify', async (req, res) => {
     res.status(500).json({ message: 'Server error' })
   }
 })
+app.get('/api/export/onix', async (req, res) => {
+  if (!isDbConnected) return res.status(503).json({ message: 'Database not available' })
+  
+  try {
+    const result = await query(`
+      SELECT
+          b.isbn_13,
+          b.title,
+          b.author,
+          b.publisher,
+          b.publication_date,
+          MAX(sp.retail_price) as retail_price
+      FROM books b
+      LEFT JOIN supplier_prices sp ON b.isbn_13 = sp.isbn_13
+      GROUP BY b.isbn_13, b.title, b.author, b.publisher, b.publication_date
+    `)
+
+    let xml = '<?xml version="1.0" encoding="utf-8"?>\n<ONIXMessage release="3.0">\n'
+    xml += '  <Header>\n    <Sender>\n      <SenderName>BridgeBooks</SenderName>\n    </Sender>\n  </Header>\n'
+
+    for (const book of result.rows) {
+      if (!book.isbn_13 || !book.title) continue
+      
+      xml += '  <Product>\n'
+      xml += `    <RecordReference>${book.isbn_13}</RecordReference>\n`
+      xml += '    <NotificationType>03</NotificationType>\n'
+      xml += '    <RecordSourceType>01</RecordSourceType>\n'
+      xml += `    <ProductIdentifier>\n      <ProductIDType>15</ProductIDType>\n      <IDValue>${book.isbn_13}</IDValue>\n    </ProductIdentifier>\n`
+      xml += '    <DescriptiveDetail>\n'
+      xml += '      <ProductComposition>00</ProductComposition>\n'
+      xml += '      <ProductForm>BA</ProductForm>\n'
+      xml += `      <TitleDetail>\n        <TitleType>01</TitleType>\n        <TitleElement>\n          <TitleElementLevel>01</TitleElementLevel>\n          <TitleText><![CDATA[${book.title}]]></TitleText>\n        </TitleElement>\n      </TitleDetail>\n`
+      xml += `      <Contributor>\n        <SequenceNumber>1</SequenceNumber>\n        <ContributorRole>A01</ContributorRole>\n        <PersonName><![CDATA[${book.author || 'Unknown Author'}]]></PersonName>\n      </Contributor>\n`
+      xml += '    </DescriptiveDetail>\n'
+      xml += '    <PublishingDetail>\n'
+      xml += `      <Publisher>\n        <PublishingRole>01</PublishingRole>\n        <PublisherName><![CDATA[${book.publisher || 'Unknown Publisher'}]]></PublisherName>\n      </Publisher>\n`
+      
+      if (book.publication_date) {
+        const d = new Date(book.publication_date)
+        if (!isNaN(d.getTime())) {
+          // ONIX 3.0 requires YYYYMMDD format
+          const yyyy = d.getFullYear()
+          const mm = String(d.getMonth() + 1).padStart(2, '0')
+          const dd = String(d.getDate()).padStart(2, '0')
+          const onixDate = `${yyyy}${mm}${dd}`
+          
+          xml += '      <PublishingDate>\n'
+          xml += '        <PublishingDateRole>01</PublishingDateRole>\n'
+          xml += `        <Date dateformat="00">${onixDate}</Date>\n`
+          xml += '      </PublishingDate>\n'
+        }
+      }
+      xml += '    </PublishingDetail>\n'
+      
+      if (book.retail_price != null) {
+        xml += `    <ProductSupply>\n      <SupplyDetail>\n        <ReturnsConditions>\n          <ReturnsCodeType>00</ReturnsCodeType>\n          <ReturnsCode>0</ReturnsCode>\n        </ReturnsConditions>\n        <ProductAvailability>20</ProductAvailability>\n        <Price>\n          <PriceType>01</PriceType>\n          <PriceAmount>${book.retail_price}</PriceAmount>\n          <CurrencyCode>ZAR</CurrencyCode>\n        </Price>\n      </SupplyDetail>\n    </ProductSupply>\n`
+      }
+      xml += '  </Product>\n'
+    }
+    
+    xml += '</ONIXMessage>'
+
+    res.setHeader('Content-Type', 'application/xml')
+    res.setHeader('Content-Disposition', 'attachment; filename="bridgebooks_onix_export.xml"')
+    return res.send(xml)
+  } catch (err) {
+    console.error('Error generating ONIX:', err)
+    return res.status(500).json({ message: 'Error generating ONIX' })
+  }
+})
+
 /* ===========================================================================
    Shopify Webhooks
    =========================================================================== */
