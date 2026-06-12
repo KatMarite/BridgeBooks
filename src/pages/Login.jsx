@@ -3,7 +3,6 @@ import { useNavigate, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import Button from '../components/Button'
 import Alert from '../components/Alert'
-import Spinner from '../components/Spinner'
 
 /**
  * Login — Authentication page for BridgeBooks.

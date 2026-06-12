@@ -17,7 +17,7 @@ import { fetchIndiePendingCount } from '../services/api'
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: '📊' },
   { to: '/search', label: 'Book Search', icon: '🔍' },
-  { to: '/status', label: 'System Status', icon: '⚙️' },
+  { to: '/status', label: 'Sync Status', icon: '🔄' },
   { to: '/price-overrides', label: 'Price Overrides', icon: '💰' },
   { to: '/indie-queue', label: 'Indie Submissions', icon: '📝', hasBadge: true },
 ]

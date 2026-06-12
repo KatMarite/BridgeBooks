@@ -5,7 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Search from './pages/Search'
-import Status from './pages/Status'
+import SyncStatus from './pages/SyncStatus'
 import PriceOverrides from './pages/PriceOverrides'
 import IndieQueue from './pages/IndieQueue'
 import SubmitIndie from './pages/SubmitIndie'
@@ -61,7 +61,7 @@ function App() {
               path="status"
               element={
                 <ProtectedRoute>
-                  <Status />
+                  <SyncStatus />
                 </ProtectedRoute>
               }
             />

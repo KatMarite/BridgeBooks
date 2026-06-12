@@ -92,6 +92,10 @@ function IndieQueue() {
   const [selectedSubmission, setSelectedSubmission] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
+  // ─── Share modal ───
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+
   // ─── Rejection flow ───
   const [showRejectForm, setShowRejectForm] = useState(false)
   const [rejectionReason, setRejectionReason] = useState('')
@@ -134,7 +138,11 @@ function IndieQueue() {
   }, [activeTab, debouncedSearch, sortOrder])
 
   useEffect(() => {
-    loadSubmissions()
+    let active = true
+    setTimeout(() => {
+      if (active) loadSubmissions()
+    }, 0)
+    return () => { active = false }
   }, [loadSubmissions])
 
   // Fetch all statuses for tab counts (on mount + after actions)
@@ -154,7 +162,11 @@ function IndieQueue() {
   }, [])
 
   useEffect(() => {
-    loadCounts()
+    let active = true
+    setTimeout(() => {
+      if (active) loadCounts()
+    }, 0)
+    return () => { active = false }
   }, [loadCounts])
 
   // ─── Open detail modal ───
@@ -250,11 +262,22 @@ function IndieQueue() {
       {/* ═══════════════════════════════════════════════
           Page Header
           ═══════════════════════════════════════════════ */}
-      <div className="text-center space-y-3">
-        <h1 className="text-3xl font-bold text-primary-dark">Indie Submissions</h1>
-        <p className="text-text-secondary max-w-xl mx-auto">
-          Review book submissions from independent authors. Approve titles for the catalogue or reject with feedback.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border pb-6">
+        <div>
+          <h1 className="text-3xl font-bold text-primary-dark">Indie Submissions</h1>
+          <p className="text-text-secondary mt-1">
+            Review book submissions from independent authors. Approve titles for the catalogue or reject with feedback.
+          </p>
+        </div>
+        <button
+          onClick={() => setIsShareModalOpen(true)}
+          className="shrink-0 self-start md:self-center inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-primary hover:bg-primary-dark shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 10.742l5.136-2.568m-5.136 5.136l5.136 2.568M19 19a3 3 0 11-6 0 3 3 0 016 0zm-6-7a3 3 0 11-6 0 3 3 0 016 0zm6-7a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          Share Submission Form
+        </button>
       </div>
 
       {/* ─── KPI Strip ─── */}
@@ -674,6 +697,97 @@ function IndieQueue() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════
+          Share Submission Form Modal
+          ═══════════════════════════════════════════════ */}
+      {isShareModalOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 modal-backdrop-enter"
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setIsShareModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden modal-content-enter"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="bg-primary text-white px-6 py-5 flex items-center justify-between">
+              <h2 className="text-lg font-bold">Share Submission Form</h2>
+              <button
+                onClick={() => setIsShareModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer"
+                aria-label="Close modal"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="p-6 text-center space-y-6">
+              <p className="text-sm text-text-secondary leading-relaxed">
+                Provide this link or QR code to self-published authors so they can submit their books directly to your review queue.
+              </p>
+
+              {/* QR Code Container */}
+              <div className="flex flex-col items-center justify-center p-4 bg-surface rounded-2xl border border-border inline-block mx-auto">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
+                    window.location.origin + '/submit'
+                  )}`}
+                  alt="QR Code for Submission Form"
+                  className="w-40 h-40 object-contain shadow-sm bg-white p-2 rounded-lg"
+                />
+                <span className="text-[10px] text-text-muted mt-2 font-mono uppercase tracking-wider">
+                  Scan to Submit
+                </span>
+              </div>
+
+              {/* Link Input + Copy Button */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-left text-text-muted uppercase tracking-wider">
+                  Submission Link
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={window.location.origin + '/submit'}
+                    className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-text-primary font-mono focus:outline-none"
+                    onClick={(e) => e.target.select()}
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.origin + '/submit')
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 2000)
+                    }}
+                    className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 shadow-sm cursor-pointer whitespace-nowrap ${
+                      copied
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-primary text-white hover:bg-primary-dark'
+                    }`}
+                  >
+                    {copied ? 'Copied! ✓' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal footer */}
+            <div className="bg-surface px-6 py-4 border-t border-border flex justify-end">
+              <button
+                onClick={() => setIsShareModalOpen(false)}
+                className="px-5 py-2.5 bg-white border border-border text-text-secondary rounded-xl text-sm font-semibold hover:bg-surface transition-colors cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

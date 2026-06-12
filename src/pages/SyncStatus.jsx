@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { getSyncLogs, triggerShopifySync } from '../services/api'
 
 function SyncStatus() {
@@ -11,7 +11,7 @@ function SyncStatus() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [toast, setToast] = useState(null)
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -22,14 +22,22 @@ function SyncStatus() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [limit, sourceFilter])
 
   useEffect(() => {
-    fetchLogs()
+    let active = true
+    setTimeout(() => {
+      if (active) fetchLogs()
+    }, 0)
     // Poll every 10 seconds to keep dashboard fresh
-    const interval = setInterval(fetchLogs, 10000)
-    return () => clearInterval(interval)
-  }, [limit, sourceFilter])
+    const interval = setInterval(() => {
+      if (active) fetchLogs()
+    }, 10000)
+    return () => {
+      active = false
+      clearInterval(interval)
+    }
+  }, [fetchLogs])
 
   const handleManualSync = async () => {
     setIsSyncing(true)

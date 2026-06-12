@@ -71,7 +71,7 @@ export async function searchBooks({ q, field, timeoutMs = 15000 } = {}) {
     return await request(`/books${qs ? `?${qs}` : ''}`, { signal: controller.signal })
   } catch (err) {
     if (err && err.name === 'AbortError') {
-      throw new Error('Request timed out')
+      throw new Error('Request timed out', { cause: err })
     }
     throw err
   } finally {
@@ -134,10 +134,21 @@ export async function clearErrors(clearAll = false) {
 }
 
 /**
- * Fetch system sync logs for all suppliers.
+ * Fetch telemetry sync logs with filters.
  */
-export async function fetchSystemSyncLogs() {
-  return request('/system/sync-logs')
+export async function getSyncLogs({ limit, source } = {}) {
+  const params = new URLSearchParams()
+  if (limit) params.set('limit', limit)
+  if (source) params.set('source', source)
+  const qs = params.toString()
+  return request(`/system/sync-logs${qs ? `?${qs}` : ''}`)
+}
+
+/**
+ * Trigger manual Shopify sync in the background.
+ */
+export async function triggerShopifySync() {
+  return request('/system/sync-shopify', { method: 'POST' })
 }
 
 /* ============ Book Enrichment ============ */

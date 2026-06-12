@@ -74,49 +74,6 @@ app.post('/api/auth/login', (req, res) => {
    System Sync Logs
    =========================================================================== */
 
-/**
- * GET /api/system/sync-logs
- * Returns sync status for each primary supplier.
- *
- * The frontend Status page expects:
- *   [{ supplier, lastSyncTime, rowsProcessed, errorsFlagged, status }]
- */
-app.get('/api/system/sync-logs', (_req, res) => {
-  const now = Date.now()
-
-  const syncLogs = [
-    {
-      supplier: 'Booksite',
-      lastSyncTime: new Date(now - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
-      rowsProcessed: 1247,
-      errorsFlagged: 0,
-      status: 'success',
-    },
-    {
-      supplier: 'Jonathan Ball',
-      lastSyncTime: new Date(now - 6 * 60 * 60 * 1000).toISOString(), // 6 hours ago
-      rowsProcessed: 834,
-      errorsFlagged: 3,
-      status: 'success',
-    },
-    {
-      supplier: 'Protea',
-      lastSyncTime: new Date(now - 48 * 60 * 60 * 1000).toISOString(), // 48 hours ago — will show as stale
-      rowsProcessed: 0,
-      errorsFlagged: 8,
-      status: 'failed',
-    },
-    {
-      supplier: 'Indie Authors',
-      lastSyncTime: new Date(now - 1 * 60 * 60 * 1000).toISOString(), // 1 hour ago
-      rowsProcessed: 23,
-      errorsFlagged: 0,
-      status: 'success',
-    },
-  ]
-
-  res.json(syncLogs)
-})
 
 function normalizeQuery(q) {
   return (q || '').toString().trim()
@@ -327,59 +284,6 @@ app.post('/api/books/:isbn/enrich', async (req, res) => {
    System Sync Logs — used by the Status page
    =========================================================================== */
 
-/**
- * GET /api/system/sync-logs
- * Returns the latest sync status for each supplier pipeline.
- * The Status page expects: { supplier, lastSyncTime, status, rowsProcessed, errorsFlagged }
- */
-app.get('/api/system/sync-logs', async (_req, res) => {
-  if (isDbConnected) {
-    try {
-      // Get the latest ingestion event for each supplier
-      const result = await query(
-        `SELECT DISTINCT ON (supplier_name)
-           supplier_name,
-           completed_at,
-           status,
-           records_processed,
-           errors_count
-         FROM ingestion_events
-         ORDER BY supplier_name, completed_at DESC`
-      )
-
-      // Map supplier_name to the display names the frontend expects
-      const supplierDisplayNames = {
-        booksite: 'Booksite',
-        jonathanBall: 'Jonathan Ball',
-        protea: 'Protea',
-      }
-
-      const logs = result.rows.map((row) => ({
-        supplier: supplierDisplayNames[row.supplier_name] || row.supplier_name,
-        lastSyncTime: row.completed_at,
-        status: row.status === 'error' ? 'failed' : row.status,
-        rowsProcessed: row.records_processed,
-        errorsFlagged: row.errors_count,
-      }))
-
-      // Add Indie Authors entry (no pipeline — manual submissions only)
-      logs.push({
-        supplier: 'Indie Authors',
-        lastSyncTime: null,
-        status: 'manual',
-        rowsProcessed: 0,
-        errorsFlagged: 0,
-      })
-
-      return res.json(logs)
-    } catch (err) {
-      console.error('Sync logs DB error:', err)
-    }
-  }
-
-  // Fallback: no data
-  res.json([])
-})
 
 /* ===========================================================================
    Dashboard Endpoints (PostgreSQL-backed via ingestion_events/ingestion_errors)
@@ -1027,11 +931,22 @@ app.get('/api/system/sync-logs', async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 100
     const source = req.query.source
     
-    let sql = 'SELECT * FROM ingestion_events'
+    let sql = `SELECT 
+      id,
+      supplier_name as source,
+      file_name as filename,
+      status,
+      records_processed as processed_records,
+      records_updated as updated_records,
+      errors_count as error_records,
+      message as error_details,
+      started_at,
+      completed_at as finished_at
+    FROM ingestion_events`
     const params = []
     
     if (source) {
-      sql += ' WHERE source = $1'
+      sql += ' WHERE supplier_name = $1'
       params.push(source)
     }
     
