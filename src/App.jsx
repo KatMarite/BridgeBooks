@@ -8,6 +8,7 @@ import Search from './pages/Search'
 import Status from './pages/Status'
 import PriceOverrides from './pages/PriceOverrides'
 import IndieQueue from './pages/IndieQueue'
+import SubmitIndie from './pages/SubmitIndie'
 import './index.css'
 
 /**
@@ -29,6 +30,9 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public standalone route for authors */}
+          <Route path="/submit" element={<SubmitIndie />} />
+
           <Route path="/" element={<Layout />}>
             {/* Default route → redirect to dashboard */}
             <Route index element={<Navigate to="/dashboard" replace />} />

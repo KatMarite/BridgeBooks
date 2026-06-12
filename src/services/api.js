@@ -182,6 +182,17 @@ export async function deletePriceOverride(id) {
 /* ============ Indie Submissions ============ */
 
 /**
+ * Submit a new indie book.
+ * @param {{ title, authorName, authorEmail, synopsis, pageCount, suggestedPrice, coverImageUrl }} data
+ */
+export async function createIndieSubmission(data) {
+  return request('/indie-submissions', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/**
  * Fetch indie submissions with optional filters.
  * @param {{ status?: string, search?: string, sort?: 'newest'|'oldest' }} params
  */

@@ -948,6 +948,45 @@ app.post('/api/indie-submissions/:id/approve', async (req, res) => {
 })
 
 /**
+ * POST /api/indie-submissions
+ * Public endpoint for authors to submit their books for review.
+ * Body: { title, authorName, authorEmail, synopsis, pageCount, suggestedPrice, coverImageUrl }
+ */
+app.post('/api/indie-submissions', async (req, res) => {
+  const { title, authorName, authorEmail, synopsis, pageCount, suggestedPrice, coverImageUrl } = req.body
+
+  if (!title || !authorName || !authorEmail) {
+    return res.status(400).json({ message: 'Title, Author Name, and Author Email are required' })
+  }
+
+  if (isDbConnected) {
+    try {
+      const result = await query(
+        `INSERT INTO indie_submissions 
+          (title, author_name, author_email, synopsis, page_count, suggested_price, cover_image_url, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+         RETURNING *`,
+        [
+          title.trim(),
+          authorName.trim(),
+          authorEmail.trim(),
+          synopsis ? synopsis.trim() : null,
+          pageCount ? parseInt(pageCount, 10) : null,
+          suggestedPrice ? parseFloat(suggestedPrice) : null,
+          coverImageUrl ? coverImageUrl.trim() : null
+        ]
+      )
+      return res.status(201).json({ success: true, submission: mapSubmissionRow(result.rows[0]) })
+    } catch (err) {
+      console.error('DB error inserting submission:', err)
+      return res.status(500).json({ message: 'Database error' })
+    }
+  }
+  
+  res.status(503).json({ message: 'Database not available' })
+})
+
+/**
  * POST /api/indie-submissions/:id/reject
  * Body: { reviewedBy, rejectionReason }
  */
@@ -978,7 +1017,54 @@ app.post('/api/indie-submissions/:id/reject', async (req, res) => {
   }
   res.status(503).json({ message: 'Database not available' })
 })
+/* ===========================================================================
+   System & Telemetry
+   =========================================================================== */
 
+app.get('/api/system/sync-logs', async (req, res) => {
+  if (!isDbConnected) return res.status(503).json({ message: 'Database not available' })
+  try {
+    const limit = parseInt(req.query.limit, 10) || 100
+    const source = req.query.source
+    
+    let sql = 'SELECT * FROM ingestion_events'
+    const params = []
+    
+    if (source) {
+      sql += ' WHERE source = $1'
+      params.push(source)
+    }
+    
+    sql += ` ORDER BY started_at DESC LIMIT $${params.length + 1}`
+    params.push(limit)
+    
+    const result = await query(sql, params)
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching sync logs:', err)
+    res.status(500).json({ message: 'Database error' })
+  }
+})
+
+app.post('/api/system/sync-shopify', async (req, res) => {
+  // Returns immediately and runs python script in background
+  try {
+    const { exec } = await import('child_process')
+    // Correct path for the venv in the current structure
+    const pythonExec = '.\\Master Catalogue Schema\\venv\\Scripts\\python.exe'
+      
+    console.log('[System] Manual Shopify Sync triggered')
+    exec(`"${pythonExec}" -m utils.sync_to_shopify --limit 500`, (err, stdout, stderr) => {
+      if (err) console.error('[System] Manual Shopify Sync Failed:', stderr)
+      else console.log('[System] Manual Shopify Sync Completed')
+    })
+    
+    res.json({ success: true, message: 'Shopify sync started in background' })
+  } catch (err) {
+    console.error('Error triggering sync:', err)
+    res.status(500).json({ message: 'Server error' })
+  }
+})
 /* ===========================================================================
    Shopify Webhooks
    =========================================================================== */
