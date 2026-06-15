@@ -18,6 +18,7 @@ Usage:
 """
 
 from utils.google_books import lookup_isbn
+from utils.open_library import lookup_isbn as ol_lookup_isbn
 
 
 def merge_book_data(supplier_data: dict, external_data: dict) -> dict:
@@ -68,7 +69,11 @@ def merge_book_data(supplier_data: dict, external_data: dict) -> dict:
 
 def enrich_and_merge(supplier_data: dict) -> dict:
     """
-    Look up a single supplier record on Google Books and merge the result.
+    Look up a single supplier record on Google Books (with Open Library
+    fallback) and merge the result.
+
+    Tries Google Books first. If no data is returned, falls back to
+    the Open Library API before giving up.
 
     Args:
         supplier_data: A normalized supplier record with isbn_13.
@@ -77,7 +82,16 @@ def enrich_and_merge(supplier_data: dict) -> dict:
         Merged dict with enrichment data filled in where available.
     """
     isbn = supplier_data.get("isbn_13")
-    external = lookup_isbn(isbn) if isbn else None
+    external = None
+
+    if isbn:
+        # Try Google Books first
+        external = lookup_isbn(isbn)
+
+        # Fall back to Open Library if Google Books didn't find it
+        if not external:
+            external = ol_lookup_isbn(isbn)
+
     return merge_book_data(supplier_data, external or {})
 
 

@@ -22,6 +22,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.google_books import lookup_isbn, bulk_enrich
+from utils.open_library import lookup_isbn as ol_lookup_isbn
 from utils.ingestion_logger import IngestionLogger
 
 DATABASE_URL = os.getenv(
@@ -74,13 +75,17 @@ def update_book_enrichment(conn, isbn, data):
 
 def run_enrichment(limit=50, single_isbn=None):
     """
-    Main enrichment loop.
+    Main enrichment loop with Google Books → Open Library fallback.
+
+    For each ISBN, we first query Google Books. If Google Books returns
+    no data, we automatically fall back to the Open Library API.
+    The enrichment source is logged for every record.
 
     Args:
         limit: Max number of books to enrich in this run.
         single_isbn: If set, only enrich this specific ISBN.
     """
-    logger = IngestionLogger('google_books', 'enrich_books.py')
+    logger = IngestionLogger('metadata_enrichment', 'enrich_books.py')
     logger.start()
 
     conn = psycopg2.connect(DATABASE_URL)
@@ -98,28 +103,62 @@ def run_enrichment(limit=50, single_isbn=None):
             conn.close()
             return
 
-        # Bulk lookup via Google Books API
-        results = bulk_enrich(isbns)
+        # Phase 1: Bulk lookup via Google Books API
+        print("\n── Phase 1: Google Books API ──")
+        google_results = bulk_enrich(isbns)
 
+        # Phase 2: Fall back to Open Library for ISBNs Google missed
+        missed_isbns = [isbn for isbn in isbns if isbn not in google_results]
+        ol_results = {}
+        if missed_isbns:
+            print(f"\n── Phase 2: Open Library fallback ({len(missed_isbns)} ISBNs) ──")
+            for isbn in missed_isbns:
+                import time
+                time.sleep(1)  # Rate-limit Open Library requests
+                ol_data = ol_lookup_isbn(isbn)
+                if ol_data:
+                    ol_results[isbn] = ol_data
+                    print(f"  [OL] {isbn}: found — {ol_data.get('title', '?')}")
+                else:
+                    print(f"  [OL] {isbn}: not found")
+        else:
+            print("\n  All ISBNs found on Google Books — skipping Open Library fallback.")
+
+        # Phase 3: Update database
         enriched_count = 0
+        google_count = 0
+        ol_count = 0
+
         for isbn in isbns:
-            data = results.get(isbn)
             logger.add_processed()
+
+            # Prefer Google Books data, fall back to Open Library
+            data = google_results.get(isbn)
+            source = "google_books"
+            if not data:
+                data = ol_results.get(isbn)
+                source = "open_library"
 
             if data:
                 updated = update_book_enrichment(conn, isbn, data)
                 if updated:
                     enriched_count += 1
                     logger.add_updated()
+                    if source == "google_books":
+                        google_count += 1
+                    else:
+                        ol_count += 1
+                    print(f"  ✓ {isbn} enriched via {source}")
             else:
-                logger.add_error(f"ISBN {isbn}: not found on Google Books")
+                logger.add_error(f"ISBN {isbn}: not found on Google Books or Open Library")
 
         conn.commit()
 
-        logger.finish(
-            status='success',
-            message=f"Google Books enrichment: {enriched_count}/{len(isbns)} books updated"
+        summary = (
+            f"Enrichment complete: {enriched_count}/{len(isbns)} books updated "
+            f"(Google Books: {google_count}, Open Library: {ol_count})"
         )
+        logger.finish(status='success', message=summary)
 
     except Exception as e:
         conn.rollback()

@@ -980,6 +980,52 @@ app.post('/api/system/sync-shopify', async (req, res) => {
     res.status(500).json({ message: 'Server error' })
   }
 })
+
+/**
+ * POST /api/system/update-pricing
+ * Triggers the dynamic pricing engine to fetch live exchange rates
+ * and recalculate ZAR retail prices for all foreign-currency books.
+ *
+ * Optional body: { dryRun: boolean, fee: number }
+ *   - dryRun: if true, calculates prices but does NOT write to DB
+ *   - fee: override the default import fee (in ZAR)
+ *
+ * Returns immediately — the pricing script runs in the background.
+ */
+app.post('/api/system/update-pricing', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ message: 'Database not available' })
+  }
+
+  try {
+    const { exec } = await import('child_process')
+    const pythonExec = '.\\Master Catalogue Schema\\venv\\Scripts\\python.exe'
+
+    // Build CLI flags from request body
+    const dryRun = req.body?.dryRun ? ' --dry-run' : ''
+    const feeFlag = req.body?.fee ? ` --fee ${Number(req.body.fee)}` : ''
+
+    const cmd = `"${pythonExec}" -m utils.pricing_engine${dryRun}${feeFlag}`
+    console.log(`[System] Pricing engine triggered: ${cmd}`)
+
+    exec(cmd, { cwd: process.cwd() }, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[System] Pricing engine failed:', stderr)
+      } else {
+        console.log('[System] Pricing engine completed:')
+        console.log(stdout)
+      }
+    })
+
+    res.json({
+      success: true,
+      message: `Pricing update started in background${req.body?.dryRun ? ' (dry run)' : ''}`,
+    })
+  } catch (err) {
+    console.error('Error triggering pricing engine:', err)
+    res.status(500).json({ message: 'Server error' })
+  }
+})
 app.get('/api/export/onix', async (req, res) => {
   if (!isDbConnected) return res.status(503).json({ message: 'Database not available' })
   
