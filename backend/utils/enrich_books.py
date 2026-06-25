@@ -104,14 +104,14 @@ def run_enrichment(limit=50, single_isbn=None):
             return
 
         # Phase 1: Bulk lookup via Google Books API
-        print("\n── Phase 1: Google Books API ──")
+        print("\n-- Phase 1: Google Books API --")
         google_results = bulk_enrich(isbns)
 
         # Phase 2: Fall back to Open Library for ISBNs Google missed
         missed_isbns = [isbn for isbn in isbns if isbn not in google_results]
         ol_results = {}
         if missed_isbns:
-            print(f"\n── Phase 2: Open Library fallback ({len(missed_isbns)} ISBNs) ──")
+            print(f"\n-- Phase 2: Open Library fallback ({len(missed_isbns)} ISBNs) --")
             for isbn in missed_isbns:
                 import time
                 time.sleep(1)  # Rate-limit Open Library requests
@@ -148,7 +148,7 @@ def run_enrichment(limit=50, single_isbn=None):
                         google_count += 1
                     else:
                         ol_count += 1
-                    print(f"  ✓ {isbn} enriched via {source}")
+                    print(f"  [OK] {isbn} enriched via {source}")
             else:
                 logger.add_error(f"ISBN {isbn}: not found on Google Books or Open Library")
 

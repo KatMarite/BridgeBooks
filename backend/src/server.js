@@ -1,8 +1,13 @@
 import express from 'express'
 import cors from 'cors'
+import multer from 'multer'
+import path from 'path'
 import { BOOKS } from './data/books.js'
 import { connectDb, isDbConnected, query } from './db.js'
 import { verifyShopifyWebhook } from './middleware/shopifyAuth.js'
+
+// Configure Multer for file uploads
+const upload = multer({ dest: 'uploads/' })
 
 const app = express()
 
@@ -1209,6 +1214,50 @@ app.post('/api/shopify/sync-selection', async (req, res) => {
   } catch (err) {
     console.error('[Sync] Error triggering sync:', err)
     return res.status(500).json({ message: 'Internal server error while syncing' })
+  }
+})
+/* ===========================================================================
+   ONIX Import
+   =========================================================================== */
+
+app.post('/api/import/onix', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No file uploaded' })
+  }
+
+  if (!isDbConnected) {
+    return res.status(503).json({ message: 'Database not connected. Cannot perform import.' })
+  }
+
+  try {
+    const { exec } = await import('child_process')
+    
+    // In dev, use the venv python. In prod, python3
+    const pythonExec = process.platform === 'win32' 
+      ? '"Master Catalogue Schema\\\\venv\\\\Scripts\\\\python.exe"' 
+      : 'python3'
+
+    const filePath = req.file.path
+    const scriptCommand = `${pythonExec} utils/import_onix.py "${filePath}"`
+
+    exec(scriptCommand, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[ONIX Import] Script error:', stderr || err.message)
+      } else {
+        console.log('[ONIX Import] Completed successfully:\n', stdout)
+      }
+      import('fs').then(fs => {
+        fs.unlink(filePath, (unlinkErr) => {
+          if (unlinkErr) console.error('[ONIX Import] Failed to delete temp file:', unlinkErr)
+        })
+      })
+    })
+
+    return res.json({ success: true, message: 'ONIX file upload received. Processing in background.' })
+
+  } catch (err) {
+    console.error('[ONIX Import] Error triggering import:', err)
+    return res.status(500).json({ message: 'Internal server error while starting import' })
   }
 })
 

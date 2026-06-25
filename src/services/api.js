@@ -116,7 +116,18 @@ export async function fetchDashboardErrors(range = 'today') {
 export async function resolveError(errorId) {
   return request(`/dashboard/errors/${errorId}/resolve`, { method: 'POST' })
 }
-
+export const uploadOnixFile = async (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  const res = await fetch(`${API_URL}/import/onix`, {
+    method: 'POST',
+    body: formData,
+    // Note: Do NOT set Content-Type header manually when sending FormData
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
 /**
  * Delete a specific error log entry.
  * @param {string} errorId

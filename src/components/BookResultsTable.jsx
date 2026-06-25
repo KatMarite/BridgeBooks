@@ -1,6 +1,6 @@
 import SupplierMatrix from './SupplierMatrix'
 
-function BookResultsTable({ books, selectedIsbns = [], onToggleIsbn, onToggleAll }) {
+function BookResultsTable({ books, selectedIsbns = [], onToggleIsbn, onToggleAll, onRowClick }) {
   const allSelected = books?.length > 0 && books.every(b => selectedIsbns.includes(b.isbn))
   const someSelected = books?.length > 0 && books.some(b => selectedIsbns.includes(b.isbn))
 
@@ -34,13 +34,22 @@ function BookResultsTable({ books, selectedIsbns = [], onToggleIsbn, onToggleAll
               const isSelected = selectedIsbns.includes(book?.isbn)
 
               return (
-                <tr key={book?.id || book?.isbn || idx} className={`${rowBorder} ${isSelected ? 'bg-primary/5' : ''}`}>
-                  <td className="px-4 py-4 align-top text-center">
+                <tr 
+                  key={book?.id || book?.isbn || idx} 
+                  className={`${rowBorder} ${isSelected ? 'bg-primary/5' : ''} ${onRowClick ? 'cursor-pointer hover:bg-gray-50 transition-colors' : ''}`}
+                  onClick={() => onRowClick && onRowClick(book?.isbn)}
+                >
+                  <td 
+                    className="px-4 py-4 align-top text-center" 
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
                       className="rounded border-gray-300 text-primary focus:ring-primary w-4 h-4 cursor-pointer"
                       checked={isSelected}
-                      onChange={() => onToggleIsbn(book?.isbn)}
+                      onChange={() => {
+                        if (onToggleIsbn) onToggleIsbn(book?.isbn)
+                      }}
                     />
                   </td>
                   <td className="px-4 py-4 align-top">

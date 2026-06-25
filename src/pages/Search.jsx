@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import Alert from '../components/Alert'
 import BookCard from '../components/BookCard'
 import BookResultsTable from '../components/BookResultsTable'
+import BookDetailModal from '../components/BookDetailModal'
 import SearchBar from '../components/SearchBar'
 import Spinner from '../components/Spinner'
 import { searchBooks, exportOnixCatalogue, syncBooksToShopify } from '../services/api'
@@ -96,6 +97,7 @@ function Search() {
   const [isExporting, setIsExporting] = useState(false)
   const [selectedIsbns, setSelectedIsbns] = useState([])
   const [isSyncing, setIsSyncing] = useState(false)
+  const [selectedDetailIsbn, setSelectedDetailIsbn] = useState(null)
 
   const [debouncedQuery, setDebouncedQuery] = useState(query)
 
@@ -313,6 +315,7 @@ function Search() {
               selectedIsbns={selectedIsbns}
               onToggleIsbn={handleToggleIsbn}
               onToggleAll={handleToggleAll}
+              onRowClick={(isbn) => setSelectedDetailIsbn(isbn)}
             />
             <div className="grid grid-cols-1 gap-4 md:hidden">
               {normalizedResults.map((b, idx) => (
@@ -322,6 +325,13 @@ function Search() {
           </>
         )}
       </div>
+
+      {selectedDetailIsbn && (
+        <BookDetailModal 
+          isbn={selectedDetailIsbn} 
+          onClose={() => setSelectedDetailIsbn(null)} 
+        />
+      )}
     </div>
   )
 }
