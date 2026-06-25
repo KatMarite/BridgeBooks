@@ -135,8 +135,13 @@ def sync_batch(limit=50):
     
     try:
         shopify = ShopifyClient()
-        primary_location = shopify.get_primary_location()
-        print(f"Connected to Shopify. Primary Location: {primary_location}")
+        try:
+            target_location = shopify.get_location_by_name("Supplier Databases")
+        except Exception:
+            print("Location 'Supplier Databases' not found. Falling back to primary location.")
+            target_location = shopify.get_primary_location()
+            
+        print(f"Connected to Shopify. Target Location: {target_location}")
     except Exception as e:
         logger.finish('error', f"Failed to connect to Shopify: {e}")
         return
@@ -172,7 +177,7 @@ def sync_batch(limit=50):
                     inventory_item_id = variant['inventory_item_id']
                     
                     # Set inventory
-                    shopify.set_inventory(inventory_item_id, target_qty, primary_location)
+                    shopify.set_inventory(inventory_item_id, target_qty, target_location)
                     
                     # Update DB
                     mark_synced(conn, isbn, product_id)
@@ -194,7 +199,7 @@ def sync_batch(limit=50):
                     inventory_item_id = variant['inventory_item_id']
                     
                     # Set inventory
-                    shopify.set_inventory(inventory_item_id, target_qty, primary_location)
+                    shopify.set_inventory(inventory_item_id, target_qty, target_location)
                     
                     # Update DB
                     mark_synced(conn, isbn)
