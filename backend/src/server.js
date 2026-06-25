@@ -1162,6 +1162,56 @@ app.post('/api/webhooks/shopify/orders', verifyShopifyWebhook, async (req, res) 
   }
 })
 
+/* ===========================================================================
+   Shopify Manual Sync
+   =========================================================================== */
+
+app.post('/api/shopify/sync-selection', async (req, res) => {
+  const { isbns } = req.body
+  if (!Array.isArray(isbns) || isbns.length === 0) {
+    return res.status(400).json({ message: 'A list of ISBNs is required' })
+  }
+
+  if (!isDbConnected) {
+    return res.status(503).json({ message: 'Database not connected. Cannot perform sync.' })
+  }
+
+  try {
+    // 1. Reset last_synced_to_shopify for selected books
+    await query(
+      `UPDATE books SET last_synced_to_shopify = NULL WHERE isbn_13 = ANY($1)`,
+      [isbns]
+    )
+
+    // 2. Trigger Python sync script
+    const { exec } = await import('child_process')
+    const limit = Math.max(isbns.length, 50)
+    
+    // In dev, use the venv python. In prod, python3
+    const pythonExec = process.platform === 'win32' 
+      ? '"Master Catalogue Schema\\\\venv\\\\Scripts\\\\python.exe"' 
+      : 'python3'
+
+    const scriptCommand = `${pythonExec} utils/sync_to_shopify.py --limit ${limit}`
+
+    exec(scriptCommand, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[Sync] Script error:', stderr || err.message)
+      } else {
+        console.log('[Sync] Completed successfully:\n', stdout)
+      }
+    })
+
+    // 3. Return immediately (fire-and-forget for the UI to be responsive)
+    // The python script will run in the background.
+    return res.json({ success: true, message: `Sync triggered for ${isbns.length} books.` })
+
+  } catch (err) {
+    console.error('[Sync] Error triggering sync:', err)
+    return res.status(500).json({ message: 'Internal server error while syncing' })
+  }
+})
+
 const PORT = Number(process.env.PORT) || 3001
 
 async function startServer() {

@@ -91,10 +91,11 @@ class ShopifyClient:
         raise ShopifyAPIError("No active location found for this Shopify store.")
 
     def get_location_by_name(self, name):
-        """Fetch the store's active location ID by its name."""
+        """Fetch the store's active location ID by its name (case-insensitive)."""
         data = self._request("GET", "locations.json")
+        target_name = name.lower()
         for loc in data.get("locations", []):
-            if loc.get("name") == name and loc.get("active"):
+            if loc.get("name", "").lower() == target_name and loc.get("active"):
                 return loc["id"]
                 
         raise ShopifyAPIError(f"No active location found with name '{name}'.")

@@ -194,19 +194,36 @@ def sync_batch(limit=50):
                     if 'images' in product_payload:
                         del product_payload['images']
                         
-                    updated = shopify.update_product(product_id, product_payload)
-                    variant = updated['variants'][0]
-                    inventory_item_id = variant['inventory_item_id']
-                    
-                    # Set inventory
-                    shopify.set_inventory(inventory_item_id, target_qty, target_location)
-                    
-                    # Update DB
-                    mark_synced(conn, isbn)
-                    synced_count += 1
-                    logger.add_updated()
-                    print(f"  [UPDATED] {isbn} (Shopify ID: {product_id})")
-                    
+                    try:
+                        updated = shopify.update_product(product_id, product_payload)
+                        variant = updated['variants'][0]
+                        inventory_item_id = variant['inventory_item_id']
+                        
+                        # Set inventory
+                        shopify.set_inventory(inventory_item_id, target_qty, target_location)
+                        
+                        # Update DB
+                        mark_synced(conn, isbn)
+                        synced_count += 1
+                        logger.add_updated()
+                        print(f"  [UPDATED] {isbn} (Shopify ID: {product_id})")
+                    except Exception as inner_e:
+                        if "404" in str(inner_e):
+                            print(f"  [NOT FOUND] Product {product_id} missing on Shopify. Recreating...")
+                            # Product was deleted from Shopify. Create it anew.
+                            created = shopify.create_product(product_payload)
+                            new_product_id = str(created['id'])
+                            variant = created['variants'][0]
+                            inventory_item_id = variant['inventory_item_id']
+                            
+                            shopify.set_inventory(inventory_item_id, target_qty, target_location)
+                            mark_synced(conn, isbn, new_product_id)
+                            synced_count += 1
+                            logger.add_updated()
+                            print(f"  [RECREATED] {isbn} -> Shopify ID: {new_product_id}")
+                        else:
+                            raise inner_e
+                            
             except Exception as e:
                 print(f"  [ERROR] {isbn}: {e}")
                 logger.add_error(f"ISBN {isbn} sync failed: {e}")

@@ -1,12 +1,26 @@
 import SupplierMatrix from './SupplierMatrix'
 
-function BookResultsTable({ books }) {
+function BookResultsTable({ books, selectedIsbns = [], onToggleIsbn, onToggleAll }) {
+  const allSelected = books?.length > 0 && books.every(b => selectedIsbns.includes(b.isbn))
+  const someSelected = books?.length > 0 && books.some(b => selectedIsbns.includes(b.isbn))
+
   return (
     <div className="hidden md:block">
       <div className="table-scroll-mobile overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
         <table className="w-full text-left">
           <thead className="bg-surface">
             <tr className="text-xs font-semibold text-text-muted">
+              <th className="px-4 py-3 w-12 text-center">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300 text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+                  checked={allSelected}
+                  ref={input => {
+                    if (input) input.indeterminate = !allSelected && someSelected
+                  }}
+                  onChange={onToggleAll}
+                />
+              </th>
               <th className="px-4 py-3">Book</th>
               <th className="px-4 py-3">ISBN</th>
               <th className="px-4 py-3">Publication date</th>
@@ -17,9 +31,18 @@ function BookResultsTable({ books }) {
             {(books || []).map((book, idx) => {
               const cover = book?.coverImageUrl || book?.cover || ''
               const rowBorder = idx === 0 ? '' : 'border-t border-border'
+              const isSelected = selectedIsbns.includes(book?.isbn)
 
               return (
-                <tr key={book?.id || book?.isbn || idx} className={rowBorder}>
+                <tr key={book?.id || book?.isbn || idx} className={`${rowBorder} ${isSelected ? 'bg-primary/5' : ''}`}>
+                  <td className="px-4 py-4 align-top text-center">
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300 text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+                      checked={isSelected}
+                      onChange={() => onToggleIsbn(book?.isbn)}
+                    />
+                  </td>
                   <td className="px-4 py-4 align-top">
                     <div className="flex gap-3">
                       <div className="w-12 h-16 rounded-xl bg-surface border border-border overflow-hidden shrink-0">

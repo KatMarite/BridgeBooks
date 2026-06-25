@@ -151,6 +151,17 @@ export async function triggerShopifySync() {
   return request('/system/sync-shopify', { method: 'POST' })
 }
 
+/**
+ * Trigger manual Shopify sync for specific ISBNs.
+ * @param {string[]} isbns
+ */
+export async function syncBooksToShopify(isbns) {
+  return request('/shopify/sync-selection', {
+    method: 'POST',
+    body: JSON.stringify({ isbns }),
+  })
+}
+
 /* ============ Book Enrichment ============ */
 
 /**
