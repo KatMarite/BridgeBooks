@@ -1261,6 +1261,58 @@ app.post('/api/import/onix', upload.single('file'), async (req, res) => {
   }
 })
 
+/* ===========================================================================
+   CSV/Excel Import
+   =========================================================================== */
+
+app.post('/api/import/csv', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No file uploaded' })
+  }
+
+  const supplierName = req.body.supplierName
+  if (!supplierName) {
+    return res.status(400).json({ message: 'Supplier Name is required' })
+  }
+
+  if (!isDbConnected) {
+    return res.status(503).json({ message: 'Database not connected. Cannot perform import.' })
+  }
+
+  try {
+    const { exec } = await import('child_process')
+    
+    // In dev, use the venv python. In prod, python3
+    const pythonExec = process.platform === 'win32' 
+      ? '"Master Catalogue Schema\\\\venv\\\\Scripts\\\\python.exe"' 
+      : 'python3'
+
+    const filePath = req.file.path
+    // Escape supplier name for shell (simple quotes)
+    const safeSupplierName = supplierName.replace(/"/g, '\\"')
+    const scriptCommand = `${pythonExec} utils/import_csv.py "${filePath}" --supplier "${safeSupplierName}"`
+
+    exec(scriptCommand, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[CSV Import] Script error:', stderr || err.message)
+      } else {
+        console.log('[CSV Import] Completed successfully:\n', stdout)
+      }
+      import('fs').then(fs => {
+        fs.unlink(filePath, (unlinkErr) => {
+          if (unlinkErr) console.error('[CSV Import] Failed to delete temp file:', unlinkErr)
+        })
+      })
+    })
+
+    return res.json({ success: true, message: 'Spreadsheet upload received. Processing in background.' })
+
+  } catch (err) {
+    console.error('[CSV Import] Error triggering import:', err)
+    return res.status(500).json({ message: 'Internal server error while starting import' })
+  }
+})
+
 const PORT = Number(process.env.PORT) || 3001
 
 async function startServer() {

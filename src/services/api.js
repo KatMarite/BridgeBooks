@@ -123,9 +123,28 @@ export const uploadOnixFile = async (file) => {
   const res = await fetch(`${API_URL}/import/onix`, {
     method: 'POST',
     body: formData,
-    // Note: Do NOT set Content-Type header manually when sending FormData
   })
   if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export const uploadCsvFile = async (file, supplierName) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('supplierName', supplierName)
+  
+  const res = await fetch(`${API_URL}/import/csv`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    try {
+      const errData = await res.json()
+      throw new Error(errData.message || 'Failed to upload CSV')
+    } catch (e) {
+      throw new Error(await res.text() || 'Failed to upload CSV')
+    }
+  }
   return res.json()
 }
 /**

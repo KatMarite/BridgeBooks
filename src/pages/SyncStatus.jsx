@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { getSyncLogs, triggerShopifySync, uploadOnixFile } from '../services/api'
+import { getSyncLogs, triggerShopifySync, uploadOnixFile, uploadCsvFile } from '../services/api'
 
 function SyncStatus() {
   const [logs, setLogs] = useState([])
@@ -10,7 +10,9 @@ function SyncStatus() {
   const [sourceFilter, setSourceFilter] = useState('')
   const [isSyncing, setIsSyncing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [supplierName, setSupplierName] = useState('')
   const fileInputRef = useRef(null)
+  const csvInputRef = useRef(null)
   const [toast, setToast] = useState(null)
 
   const fetchLogs = useCallback(async () => {
@@ -71,6 +73,30 @@ function SyncStatus() {
     }
   }
 
+  const handleCsvUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!supplierName.trim()) {
+      showToast('Please enter a Supplier Name first.', true)
+      if (csvInputRef.current) csvInputRef.current.value = ''
+      return
+    }
+
+    setIsUploading(true)
+    try {
+      await uploadCsvFile(file, supplierName.trim())
+      showToast('Spreadsheet uploaded! Processing started in the background.')
+      if (csvInputRef.current) csvInputRef.current.value = ''
+      setSupplierName('')
+      setTimeout(fetchLogs, 2000)
+    } catch (err) {
+      showToast('Upload failed: ' + err.message, true)
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
   const showToast = (message, isError = false) => {
     setToast({ message, isError })
     setTimeout(() => setToast(null), 4000)
@@ -118,7 +144,47 @@ function SyncStatus() {
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 items-center">
+          <input 
+            type="file" 
+            accept=".csv, .xls, .xlsx" 
+            className="hidden" 
+            ref={csvInputRef}
+            onChange={handleCsvUpload}
+          />
+          <div className="relative">
+            <input 
+              type="text"
+              placeholder="Supplier Name..."
+              value={supplierName}
+              onChange={(e) => setSupplierName(e.target.value)}
+              className="border border-border rounded-lg pl-3 pr-3 py-2.5 text-sm focus:ring-primary focus:border-primary w-40"
+            />
+          </div>
+          <button
+            onClick={() => csvInputRef.current?.click()}
+            disabled={isUploading}
+            className={`px-4 py-2.5 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2 ${
+              isUploading 
+                ? 'bg-gray-200 text-gray-500 cursor-not-allowed' 
+                : 'bg-white border border-border text-primary hover:bg-gray-50'
+            }`}
+          >
+            {isUploading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></span>
+                Uploading...
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                CSV/Excel
+              </>
+            )}
+          </button>
+
+          <div className="w-px h-8 bg-gray-300 mx-2"></div>
+
           <input 
             type="file" 
             accept=".xml" 
@@ -129,7 +195,7 @@ function SyncStatus() {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
-            className={`px-5 py-2.5 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2 ${
+            className={`px-4 py-2.5 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2 ${
               isUploading 
                 ? 'bg-gray-200 text-gray-500 cursor-not-allowed' 
                 : 'bg-white border border-border text-primary hover:bg-gray-50'
@@ -143,7 +209,7 @@ function SyncStatus() {
             ) : (
               <>
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                Upload ONIX
+                ONIX
               </>
             )}
           </button>
