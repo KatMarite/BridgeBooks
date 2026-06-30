@@ -120,7 +120,7 @@ export const uploadOnixFile = async (file) => {
   const formData = new FormData()
   formData.append('file', file)
   
-  const res = await fetch(`${API_URL}/import/onix`, {
+  const res = await fetch(`${BASE_URL}/import/onix`, {
     method: 'POST',
     body: formData,
   })
@@ -133,7 +133,7 @@ export const uploadCsvFile = async (file, supplierName) => {
   formData.append('file', file)
   formData.append('supplierName', supplierName)
   
-  const res = await fetch(`${API_URL}/import/csv`, {
+  const res = await fetch(`${BASE_URL}/import/csv`, {
     method: 'POST',
     body: formData,
   })
