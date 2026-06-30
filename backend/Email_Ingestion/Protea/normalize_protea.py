@@ -17,6 +17,7 @@ import pandas as pd
 # Add backend root to path for shared utils
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from utils.ingestion_logger import IngestionLogger
+from utils.cleaners import clean_isbn, clean_price, clean_stock
 
 # ----------------------------
 # PATHS
@@ -78,22 +79,26 @@ print(f"  Columns: {list(df.columns)}")
 column_map = {}
 for col in df.columns:
     lower = str(col).lower().strip()
+    std_name = None
     if 'isbn' in lower:
-        column_map[col] = 'isbn_13'
+        std_name = 'isbn_13'
     elif lower in ['title', 'book title', 'product name']:
-        column_map[col] = 'title'
+        std_name = 'title'
     elif lower in ['author', 'writer', 'author name']:
-        column_map[col] = 'author'
+        std_name = 'author'
     elif lower in ['publisher', 'imprint']:
-        column_map[col] = 'publisher'
+        std_name = 'publisher'
     elif 'price' in lower and 'cost' not in lower:
-        column_map[col] = 'retail_price'
+        std_name = 'retail_price'
     elif lower in ['category', 'genre', 'subject']:
-        column_map[col] = 'category'
+        std_name = 'category'
     elif 'stock' in lower or 'qty' in lower or 'quantity' in lower:
-        column_map[col] = 'stock_qty'
+        std_name = 'stock_qty'
     elif 'date' in lower and 'pub' in lower:
-        column_map[col] = 'publication_date'
+        std_name = 'publication_date'
+
+    if std_name and std_name not in column_map.values():
+        column_map[col] = std_name
 
 if column_map:
     df = df.rename(columns=column_map)
@@ -120,23 +125,20 @@ if missing:
 # ----------------------------
 # Validate ISBN
 if 'isbn_13' in df.columns:
-    df['isbn_13'] = df['isbn_13'].astype(str).str.strip()
+    df['isbn_13'] = df['isbn_13'].apply(clean_isbn)
     before = len(df)
-    df = df[df['isbn_13'].str.match(r'^\d{13}$', na=False)]
+    df = df.dropna(subset=['isbn_13'])
     dropped = before - len(df)
     if dropped > 0:
-        logger.add_error(f"Dropped {dropped} rows with invalid ISBN-13")
+        logger.add_error(f"Dropped {dropped} rows with invalid ISBNs")
 
 # Parse price
 if 'retail_price' in df.columns:
-    bad_prices = pd.to_numeric(df['retail_price'], errors='coerce').isna().sum()
-    if bad_prices > 0:
-        logger.add_error(f"{bad_prices} rows have non-numeric retail_price")
-    df['retail_price'] = pd.to_numeric(df['retail_price'], errors='coerce').fillna(0)
+    df['retail_price'] = df['retail_price'].apply(clean_price)
 
 # Stock status
 if 'stock_qty' in df.columns:
-    df['in_stock'] = pd.to_numeric(df['stock_qty'], errors='coerce').fillna(0) > 0
+    df['in_stock'] = df['stock_qty'].apply(clean_stock)
 else:
     df['in_stock'] = True  # Assume in-stock if no stock column
 

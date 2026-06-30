@@ -15,6 +15,7 @@ import pandas as pd
 # Add backend root to path for shared utils
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 from utils.ingestion_logger import IngestionLogger
+from utils.cleaners import clean_isbn, clean_price, clean_stock
 
 # ----------------------------
 # PATHS
@@ -62,26 +63,24 @@ for col in ["isbn_13", "title", "author", "publisher", "stock_status", "category
     if col in df.columns:
         df[col] = df[col].astype(str).str.strip()
 
-# Track rows dropped by ISBN validation
+# Clean ISBNs and drop invalid ones
 before_isbn = len(df)
-df = df[df["isbn_13"].str.match(r"^\d{13}$", na=False)]
+df['isbn_13'] = df['isbn_13'].apply(clean_isbn)
+df = df.dropna(subset=['isbn_13'])
 isbn_dropped = before_isbn - len(df)
 if isbn_dropped > 0:
-    logger.add_error(f"Dropped {isbn_dropped} rows with invalid ISBN-13 format")
+    logger.add_error(f"Dropped {isbn_dropped} rows with invalid ISBNs")
 
 # Track rows with missing titles
 missing_titles = df["title"].isin(["", "nan", "None"]).sum()
 if missing_titles > 0:
     logger.add_error(f"{missing_titles} rows have missing or empty titles")
 
-# Normalize stock status to boolean
-df["in_stock"] = df["stock_status"].str.upper() == "IN STOCK"
+# Normalize stock status using cleaner
+df["in_stock"] = df["stock_status"].apply(clean_stock)
 
-# Parse retail price — log non-numeric values
-bad_prices = pd.to_numeric(df["retail_price"], errors="coerce").isna().sum()
-if bad_prices > 0:
-    logger.add_error(f"{bad_prices} rows have non-numeric retail_price values")
-df["retail_price"] = pd.to_numeric(df["retail_price"], errors="coerce").fillna(0)
+# Parse retail price using cleaner
+df["retail_price"] = df["retail_price"].apply(clean_price)
 
 df["discount"] = pd.to_numeric(df["discount"], errors="coerce").fillna(0)
 df["supplier_name"] = "booksite"

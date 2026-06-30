@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.ingestion_logger import IngestionLogger
+from utils.cleaners import clean_isbn, clean_price
 
 # Load environment variables
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -26,25 +27,6 @@ COLUMN_ALIASES = {
     'retail_price': ['price', 'retail price', 'rrp', 'za price', 'zar price', 'selling price', 'retail']
 }
 
-def clean_isbn(val):
-    if pd.isna(val):
-        return None
-    cleaned = str(val).split('.')[0].strip().replace('-', '').replace(' ', '')
-    if len(cleaned) == 13 and cleaned.isdigit():
-        return cleaned
-    if len(cleaned) == 10 and cleaned.isdigit(): # Technically we only want 13, but let's allow 10 for now
-        return cleaned
-    return None
-
-def clean_price(val):
-    if pd.isna(val):
-        return 0.0
-    try:
-        # Remove currency symbols and commas
-        cleaned = str(val).replace('R', '').replace('$', '').replace(',', '').strip()
-        return float(cleaned)
-    except ValueError:
-        return 0.0
 
 def normalize_columns(df):
     """

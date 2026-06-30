@@ -12,6 +12,7 @@ import pandas as pd
 # Add backend root to path for shared utils
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from utils.ingestion_logger import IngestionLogger
+from utils.cleaners import clean_isbn, clean_price, clean_stock
 
 # ----------------------------
 # PATHS
@@ -77,11 +78,12 @@ for index, row in df.iterrows():
         if len(values) < 3:
             raise ValueError("Malformed row (too short)")
 
-        isbn_13 = str(values[0]).strip()
+        raw_isbn = str(values[0]).strip()
+        isbn_13 = clean_isbn(raw_isbn)
         title = str(values[1]).strip()
 
-        if not isbn_13 or not isbn_13.isdigit() or len(isbn_13) != 13:
-            raise ValueError(f"Invalid ISBN-13: '{isbn_13}'")
+        if not isbn_13:
+            raise ValueError(f"Invalid ISBN: '{raw_isbn}'")
 
         if not title:
             raise ValueError("Missing title")
@@ -89,20 +91,16 @@ for index, row in df.iterrows():
         author = str(values[2]).strip() if len(values) > 2 else ""
         publication_date = str(values[3]).strip() if len(values) > 3 else ""
         publisher = str(values[4]).strip() if len(values) > 4 else ""
-        stock_status = str(values[5]).strip().upper() if len(values) > 5 else ""
-        retail_price = values[6] if len(values) > 6 else 0
-        discount = values[7] if len(values) > 7 else 0
+        stock_status = str(values[5]).strip() if len(values) > 5 else ""
+        retail_price_raw = values[6] if len(values) > 6 else 0
+        discount_raw = values[7] if len(values) > 7 else 0
         category = str(values[8]).strip() if len(values) > 8 else ""
 
-        in_stock = stock_status == "IN STOCK"
-
+        in_stock = clean_stock(stock_status)
+        retail_price = clean_price(retail_price_raw)
+        
         try:
-            retail_price = float(retail_price)
-        except (ValueError, TypeError):
-            retail_price = 0.0
-
-        try:
-            discount = float(discount)
+            discount = float(clean_price(discount_raw))
         except (ValueError, TypeError):
             discount = 0.0
 
