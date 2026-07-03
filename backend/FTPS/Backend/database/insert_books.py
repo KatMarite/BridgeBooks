@@ -1,4 +1,17 @@
 """
+DEPRECATED — DO NOT RUN.
+
+Mislabeled duplicate of the Jonathan Ball pipeline (would insert JBP data
+tagged as supplier_name='booksite', corrupting supplier_prices). Use
+backend/FTPS/Booksite/insert_books.py for real Booksite data instead.
+"""
+import sys
+sys.exit(
+    "This script is disabled — it's a mislabeled duplicate of the Jonathan "
+    "Ball pipeline. Use backend/FTPS/Booksite/insert_books.py instead."
+)
+
+"""
 insert_books.py — Inserts normalized Booksite data into the BridgeBooks PostgreSQL database.
 
 Inserts into both:

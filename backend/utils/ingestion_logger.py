@@ -98,29 +98,33 @@ class IngestionLogger:
             cur = conn.cursor()
 
             # 1. Insert the event
+            # NOTE: matches the live Supabase schema — ingestion_events has
+            # error_count (not errors_count), finished_at (not completed_at),
+            # and no records_updated column.
             cur.execute(
                 """INSERT INTO ingestion_events
                    (supplier_name, status, file_name, records_processed,
-                    records_inserted, records_updated, errors_count,
-                    message, started_at, completed_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    records_inserted, error_count,
+                    message, started_at, finished_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                    RETURNING id""",
                 (
                     self.supplier_name, status, self.file_name,
                     self.records_processed, self.records_inserted,
-                    self.records_updated, len(self.errors),
+                    len(self.errors),
                     message, self.started_at
                 )
             )
             self.event_id = cur.fetchone()[0]
 
             # 2. Insert individual errors
+            # NOTE: ingestion_errors only has (event_id, error_message, created_at)
             for err_msg in self.errors:
                 cur.execute(
                     """INSERT INTO ingestion_errors
-                       (event_id, supplier_name, file_name, message)
-                       VALUES (%s, %s, %s, %s)""",
-                    (self.event_id, self.supplier_name, self.file_name, err_msg)
+                       (event_id, error_message)
+                       VALUES (%s, %s)""",
+                    (self.event_id, err_msg)
                 )
 
             conn.commit()

@@ -1,25 +1,62 @@
 import pandas as pd
 import re
 
+
+def _isbn10_to_13(isbn10: str) -> str:
+    """Convert a valid 10-digit ISBN to its ISBN-13 equivalent."""
+    core = "978" + isbn10[:9]
+    total = 0
+    for i, ch in enumerate(core):
+        digit = int(ch)
+        total += digit if i % 2 == 0 else digit * 3
+    check = (10 - (total % 10)) % 10
+    return core + str(check)
+
+
+def _is_valid_isbn13(isbn13: str) -> bool:
+    if len(isbn13) != 13 or not isbn13.isdigit():
+        return False
+    total = 0
+    for i, ch in enumerate(isbn13):
+        digit = int(ch)
+        total += digit if i % 2 == 0 else digit * 3
+    return total % 10 == 0
+
+
+def _is_valid_isbn10(isbn10: str) -> bool:
+    if len(isbn10) != 10:
+        return False
+    total = 0
+    for i, ch in enumerate(isbn10):
+        if ch.upper() == "X" and i == 9:
+            value = 10
+        elif ch.isdigit():
+            value = int(ch)
+        else:
+            return False
+        total += value * (10 - i)
+    return total % 11 == 0
+
+
 def clean_isbn(val):
     """
     Cleans an ISBN string by removing dashes, spaces, and other non-numeric characters.
-    Validates that the resulting string is either 10 or 13 digits long.
-    Returns the cleaned ISBN string, or None if invalid.
+    Validates the check digit and converts ISBN-10 to ISBN-13.
+    Returns a valid ISBN-13 string, or None if invalid.
     """
     if pd.isna(val):
         return None
-    
-    val_str = str(val).split('.')[0].strip()
-    
+
+    val_str = str(val).split('.')[0].strip().upper()
+
     # Remove all dashes and spaces
     cleaned = re.sub(r'[-\s]', '', val_str)
-    
+
     if len(cleaned) == 13 and cleaned.isdigit():
-        return cleaned
-    if len(cleaned) == 10 and cleaned.isdigit():
-        return cleaned
-        
+        return cleaned if _is_valid_isbn13(cleaned) else None
+    if len(cleaned) == 10 and _is_valid_isbn10(cleaned):
+        return _isbn10_to_13(cleaned)
+
     return None
 
 def clean_price(val):
