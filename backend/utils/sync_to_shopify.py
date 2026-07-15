@@ -19,6 +19,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.shopify_client import ShopifyClient, ShopifyAPIError
 from utils.ingestion_logger import IngestionLogger
+from utils.google_books import lookup_isbn as gb_lookup_isbn
+from utils.open_library import lookup_isbn as ol_lookup_isbn
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -63,8 +65,55 @@ def fetch_book_data(conn, isbn):
     cur.execute("SELECT * FROM supplier_prices WHERE isbn_13 = %s", (isbn,))
     suppliers = [dict(row) for row in cur.fetchall()]
     cur.close()
-    
+
     return book, suppliers
+
+def enrich_if_needed(conn, isbn, book):
+    """
+    Fill in a missing description/cover image via Google Books (falling
+    back to Open Library) right before this specific book goes to
+    Shopify — not run against the whole catalogue.
+
+    This only touches books that are actually being synced. Most of the
+    377k-book catalogue will never reach Shopify, and these APIs are
+    slow and rate-limited, so enriching everything up front would be
+    wasted effort. As international-publisher ONIX feeds come online,
+    many titles will already arrive with real descriptions/covers from
+    the publisher and won't need this at all — this is a gap-filler for
+    titles (mostly local/small-publisher) whose source data didn't
+    include it.
+    """
+    if book.get('description') and book.get('cover_image_url'):
+        return book  # already has both — nothing to do
+
+    data = gb_lookup_isbn(isbn)
+    source = "Google Books"
+    if not data:
+        data = ol_lookup_isbn(isbn)
+        source = "Open Library"
+
+    if not data:
+        print(f"  [enrich] {isbn}: not found on Google Books or Open Library")
+        return book  # not found on either source — proceed without it
+
+    new_description = book.get('description') or data.get('description')
+    new_cover = book.get('cover_image_url') or data.get('cover_image_url')
+
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE books SET
+             description = COALESCE(NULLIF(description, ''), %s),
+             cover_image_url = COALESCE(NULLIF(cover_image_url, ''), %s),
+             updated_at = NOW()
+           WHERE isbn_13 = %s""",
+        (data.get('description'), data.get('cover_image_url'), isbn)
+    )
+    cur.close()
+    print(f"  [enriched] {isbn} via {source}")
+
+    book['description'] = new_description
+    book['cover_image_url'] = new_cover
+    return book
 
 def build_shopify_payload(book, suppliers):
     """Apply business logic to generate Shopify product data."""
@@ -174,6 +223,8 @@ def sync_batch(isbns):
             if not suppliers:
                 mark_synced(conn, isbn)
                 continue
+
+            book = enrich_if_needed(conn, isbn, book)
 
             product_payload, target_qty = build_shopify_payload(book, suppliers)
             logger.add_processed()

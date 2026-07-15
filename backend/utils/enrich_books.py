@@ -17,6 +17,8 @@ import os
 import sys
 import argparse
 from datetime import datetime
+from pathlib import Path
+from dotenv import load_dotenv
 
 # Ensure backend root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,6 +27,8 @@ from utils.google_books import lookup_isbn, bulk_enrich
 from utils.open_library import lookup_isbn as ol_lookup_isbn
 from utils.ingestion_logger import IngestionLogger
 
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:admin123@localhost:5432/Bridge_dev"
@@ -32,13 +36,18 @@ DATABASE_URL = os.getenv(
 
 
 def get_unenriched_isbns(conn, limit=50):
-    """Fetch ISBNs that have no description, cover image, or page count."""
+    """Fetch ISBNs that have no description or cover image.
+
+    NOTE: books has no page_count column (that was an assumption from an
+    older, unused schema draft), so it's dropped from both the "needs
+    enrichment" check and the update below — Google Books/Open Library's
+    page count just isn't persisted here.
+    """
     cur = conn.cursor()
     cur.execute(
         """SELECT isbn_13 FROM books
            WHERE (description IS NULL OR description = '')
              AND (cover_image_url IS NULL OR cover_image_url = '')
-             AND (page_count IS NULL OR page_count = 0)
            ORDER BY updated_at DESC
            LIMIT %s""",
         (limit,)
@@ -58,13 +67,11 @@ def update_book_enrichment(conn, isbn, data):
         """UPDATE books SET
              description = COALESCE(NULLIF(description, ''), %s),
              cover_image_url = COALESCE(NULLIF(cover_image_url, ''), %s),
-             page_count = COALESCE(page_count, %s),
              updated_at = NOW()
            WHERE isbn_13 = %s""",
         (
             data.get("description"),
             data.get("cover_image_url"),
-            data.get("page_count"),
             isbn,
         )
     )
@@ -88,7 +95,7 @@ def run_enrichment(limit=50, single_isbn=None):
     logger = IngestionLogger('metadata_enrichment', 'enrich_books.py')
     logger.start()
 
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(DATABASE_URL, sslmode="require")
 
     try:
         if single_isbn:
