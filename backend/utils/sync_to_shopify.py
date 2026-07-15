@@ -11,6 +11,8 @@ import argparse
 import psycopg2
 from psycopg2.extras import DictCursor
 from datetime import datetime
+from pathlib import Path
+from dotenv import load_dotenv
 
 # Ensure backend root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,31 +20,39 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.shopify_client import ShopifyClient, ShopifyAPIError
 from utils.ingestion_logger import IngestionLogger
 
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:admin123@localhost:5432/Bridge_dev"
 )
 
-def fetch_books_to_sync(conn, limit=50):
-    """Find ISBNs that have changed since the last Shopify sync."""
+def fetch_books_by_isbns(conn, isbns):
+    """
+    Fetch exactly the given ISBNs, in the order given, regardless of
+    whether they've changed or been synced before.
+
+    BridgeBooks curates which books go to Shopify — staff explicitly
+    select titles (e.g. from the Search screen) rather than syncing
+    everything that's changed. This is the only supported entry point:
+    there is deliberately no "sync everything that changed" mode, since
+    that could push books to the public storefront that nobody chose.
+    """
+    if not isbns:
+        return []
     cur = conn.cursor()
-    # Find books where the book itself OR its supplier prices have updated
     cur.execute(
         """
-        SELECT DISTINCT b.isbn_13
+        SELECT b.isbn_13
         FROM books b
-        LEFT JOIN supplier_prices sp ON b.isbn_13 = sp.isbn_13
-        WHERE b.last_synced_to_shopify IS NULL
-           OR b.updated_at > b.last_synced_to_shopify
-           OR sp.updated_at > b.last_synced_to_shopify
+        WHERE b.isbn_13 = ANY(%s)
         ORDER BY b.isbn_13
-        LIMIT %s
         """,
-        (limit,)
+        (list(isbns),)
     )
-    isbns = [row[0] for row in cur.fetchall()]
+    found = [row[0] for row in cur.fetchall()]
     cur.close()
-    return isbns
+    return found
 
 def fetch_book_data(conn, isbn):
     """Fetch the master record and all supplier prices for an ISBN."""
@@ -126,13 +136,13 @@ def mark_synced(conn, isbn, shopify_product_id=None):
         )
     cur.close()
 
-def sync_batch(limit=50):
-    """Main sync execution loop."""
+def sync_batch(isbns):
+    """Main sync execution loop — syncs exactly the given ISBNs."""
     logger = IngestionLogger('shopify_sync', 'sync_to_shopify.py')
     logger.start()
 
-    conn = psycopg2.connect(DATABASE_URL)
-    
+    conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+
     try:
         shopify = ShopifyClient()
         try:
@@ -147,11 +157,11 @@ def sync_batch(limit=50):
         return
 
     try:
-        isbns = fetch_books_to_sync(conn, limit)
-        print(f"Found {len(isbns)} books needing sync.")
-        
+        isbns = fetch_books_by_isbns(conn, isbns)
+        print(f"Found {len(isbns)} of the requested books in the catalogue.")
+
         if not isbns:
-            logger.finish('success', 'No books need syncing at this time.')
+            logger.finish('success', 'None of the requested ISBNs were found.')
             conn.close()
             return
 
@@ -241,8 +251,19 @@ def sync_batch(limit=50):
         conn.close()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Sync BridgeBooks catalogue to Shopify")
-    parser.add_argument("--limit", type=int, default=50, help="Max books to sync (default: 50)")
+    parser = argparse.ArgumentParser(
+        description="Sync specific, curated BridgeBooks titles to Shopify. "
+                     "There is no 'sync everything' mode — you must name the ISBNs."
+    )
+    parser.add_argument(
+        "--isbns", type=str, required=True,
+        help="Comma-separated list of ISBN-13s to sync, e.g. --isbns 9780624081760,9781770105102"
+    )
     args = parser.parse_args()
 
-    sync_batch(limit=args.limit)
+    isbn_list = [i.strip() for i in args.isbns.split(",") if i.strip()]
+    if not isbn_list:
+        print("No valid ISBNs provided in --isbns.")
+        sys.exit(1)
+
+    sync_batch(isbn_list)

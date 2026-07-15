@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { getSyncLogs, triggerShopifySync, uploadOnixFile, uploadCsvFile } from '../services/api'
+import { getSyncLogs, uploadOnixFile, uploadCsvFile } from '../services/api'
 
 function SyncStatus() {
   const [logs, setLogs] = useState([])
@@ -8,7 +8,6 @@ function SyncStatus() {
   
   const [limit, setLimit] = useState(50)
   const [sourceFilter, setSourceFilter] = useState('')
-  const [isSyncing, setIsSyncing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [supplierName, setSupplierName] = useState('')
   const fileInputRef = useRef(null)
@@ -42,19 +41,6 @@ function SyncStatus() {
       clearInterval(interval)
     }
   }, [fetchLogs])
-
-  const handleManualSync = async () => {
-    setIsSyncing(true)
-    try {
-      await triggerShopifySync()
-      showToast('Shopify sync started in the background!')
-      setTimeout(fetchLogs, 2000) // Initial quick refresh
-    } catch (err) {
-      showToast('Failed to start sync: ' + err.message, true)
-    } finally {
-      setTimeout(() => setIsSyncing(false), 5000) // Prevent hammering
-    }
-  }
 
   const handleFileUpload = async (event) => {
     const file = event.target.files?.[0]
@@ -213,32 +199,12 @@ function SyncStatus() {
               </>
             )}
           </button>
-          
-          <button
-            onClick={handleManualSync}
-            disabled={isSyncing}
-            className={`px-5 py-2.5 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2 ${
-              isSyncing 
-                ? 'bg-gray-200 text-gray-500 cursor-not-allowed' 
-                : 'bg-primary text-white hover:bg-primary-dark'
-            }`}
-          >
-            {isSyncing ? (
-              <>
-                <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></span>
-                Syncing...
-              </>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Shopify Sync
-              </>
-            )}
-          </button>
         </div>
       </div>
+
+      <p className="text-sm text-text-muted -mt-2">
+        Shopify sync is curated, not automatic — select specific books to sync from the Book Search screen.
+      </p>
 
       {/* Filters */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-border flex gap-4 items-center">
@@ -323,10 +289,6 @@ function SyncStatus() {
                           <div className="text-center">
                             <div className="text-text-muted text-xs uppercase">Processed</div>
                             <div className="font-medium">{log.processed_records}</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-text-muted text-xs uppercase">Updated</div>
-                            <div className="font-medium text-green-600">{log.updated_records}</div>
                           </div>
                           <div className="text-center">
                             <div className="text-text-muted text-xs uppercase">Errors</div>

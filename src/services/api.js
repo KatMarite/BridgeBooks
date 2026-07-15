@@ -175,14 +175,9 @@ export async function getSyncLogs({ limit, source } = {}) {
 }
 
 /**
- * Trigger manual Shopify sync in the background.
- */
-export async function triggerShopifySync() {
-  return request('/system/sync-shopify', { method: 'POST' })
-}
-
-/**
- * Trigger manual Shopify sync for specific ISBNs.
+ * Trigger manual Shopify sync for specific, curated ISBNs. There is no
+ * "sync everything" mode — BridgeBooks only ever pushes books that were
+ * explicitly selected (e.g. from the Search screen).
  * @param {string[]} isbns
  */
 export async function syncBooksToShopify(isbns) {

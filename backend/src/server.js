@@ -977,25 +977,10 @@ app.get('/api/system/sync-logs', async (req, res) => {
   }
 })
 
-app.post('/api/system/sync-shopify', async (req, res) => {
-  // Returns immediately and runs python script in background
-  try {
-    const { exec } = await import('child_process')
-    // Correct path for the venv in the current structure
-    const pythonExec = '.\\Master Catalogue Schema\\venv\\Scripts\\python.exe'
-      
-    console.log('[System] Manual Shopify Sync triggered')
-    exec(`"${pythonExec}" -m utils.sync_to_shopify --limit 500`, (err, stdout, stderr) => {
-      if (err) console.error('[System] Manual Shopify Sync Failed:', stderr)
-      else console.log('[System] Manual Shopify Sync Completed')
-    })
-    
-    res.json({ success: true, message: 'Shopify sync started in background' })
-  } catch (err) {
-    console.error('Error triggering sync:', err)
-    res.status(500).json({ message: 'Server error' })
-  }
-})
+// NOTE: there is deliberately no "sync everything that changed" endpoint.
+// BridgeBooks curates which books reach the public Shopify storefront —
+// use POST /api/shopify/sync-selection with an explicit list of ISBNs
+// instead (see the Search screen's book-selection sync).
 
 /**
  * POST /api/system/update-pricing
@@ -1015,13 +1000,16 @@ app.post('/api/system/update-pricing', async (req, res) => {
 
   try {
     const { exec } = await import('child_process')
-    const pythonExec = '.\\Master Catalogue Schema\\venv\\Scripts\\python.exe'
+    // In dev (Mac/Linux), use python3. On Windows, use the venv python.
+    const pythonExec = process.platform === 'win32'
+      ? '"Master Catalogue Schema\\venv\\Scripts\\python.exe"'
+      : 'python3'
 
     // Build CLI flags from request body
     const dryRun = req.body?.dryRun ? ' --dry-run' : ''
     const feeFlag = req.body?.fee ? ` --fee ${Number(req.body.fee)}` : ''
 
-    const cmd = `"${pythonExec}" -m utils.pricing_engine${dryRun}${feeFlag}`
+    const cmd = `${pythonExec} utils/pricing_engine.py${dryRun}${feeFlag}`
     console.log(`[System] Pricing engine triggered: ${cmd}`)
 
     exec(cmd, { cwd: process.cwd() }, (err, stdout, stderr) => {
@@ -1192,25 +1180,26 @@ app.post('/api/shopify/sync-selection', async (req, res) => {
     return res.status(503).json({ message: 'Database not connected. Cannot perform sync.' })
   }
 
-  try {
-    // 1. Reset last_synced_to_shopify for selected books
-    await query(
-      `UPDATE books SET last_synced_to_shopify = NULL WHERE isbn_13 = ANY($1)`,
-      [isbns]
-    )
+  // Only allow valid ISBN-13 strings through to the shell command below.
+  const safeIsbns = isbns.filter((i) => /^\d{13}$/.test(String(i)))
+  if (safeIsbns.length === 0) {
+    return res.status(400).json({ message: 'No valid ISBN-13s in the selection' })
+  }
 
-    // 2. Trigger Python sync script
+  try {
+    // Sync exactly the selected ISBNs — no "everything that changed" mode.
+    // The script itself fetches these directly regardless of prior sync
+    // status, so there's no need to reset last_synced_to_shopify first.
     const { exec } = await import('child_process')
-    const limit = Math.max(isbns.length, 50)
-    
-    // In dev, use the venv python. In prod, python3
-    const pythonExec = process.platform === 'win32' 
-      ? '"Master Catalogue Schema\\\\venv\\\\Scripts\\\\python.exe"' 
+
+    // In dev, use python3. On Windows, use the venv python.
+    const pythonExec = process.platform === 'win32'
+      ? '"Master Catalogue Schema\\venv\\Scripts\\python.exe"'
       : 'python3'
 
-    const scriptCommand = `${pythonExec} utils/sync_to_shopify.py --limit ${limit}`
+    const scriptCommand = `${pythonExec} utils/sync_to_shopify.py --isbns ${safeIsbns.join(',')}`
 
-    exec(scriptCommand, (err, stdout, stderr) => {
+    exec(scriptCommand, { cwd: process.cwd() }, (err, stdout, stderr) => {
       if (err) {
         console.error('[Sync] Script error:', stderr || err.message)
       } else {
@@ -1218,9 +1207,9 @@ app.post('/api/shopify/sync-selection', async (req, res) => {
       }
     })
 
-    // 3. Return immediately (fire-and-forget for the UI to be responsive)
-    // The python script will run in the background.
-    return res.json({ success: true, message: `Sync triggered for ${isbns.length} books.` })
+    // Fire-and-forget for the UI to be responsive — the script runs in
+    // the background.
+    return res.json({ success: true, message: `Sync triggered for ${safeIsbns.length} book(s).` })
 
   } catch (err) {
     console.error('[Sync] Error triggering sync:', err)
