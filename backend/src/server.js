@@ -137,10 +137,9 @@ app.get('/api/books', async (req, res) => {
           b.isbn_13 AS isbn, 
           b.title, 
           b.author, 
-          b.publication_date AS "publicationDate", 
+          b.publication_date AS "publicationDate",
           b.cover_image_url AS "coverImageUrl",
           b.description,
-          b.page_count AS "pageCount",
           json_object_agg(
             sp.supplier_name,
             json_build_object(
@@ -183,10 +182,9 @@ app.get('/api/books/:id', async (req, res) => {
           b.isbn_13 AS isbn, 
           b.title, 
           b.author, 
-          b.publication_date AS "publicationDate", 
+          b.publication_date AS "publicationDate",
           b.cover_image_url AS "coverImageUrl",
           b.description,
-          b.page_count AS "pageCount",
           json_object_agg(
             sp.supplier_name,
             json_build_object(
@@ -260,14 +258,15 @@ app.post('/api/books/:isbn/enrich', async (req, res) => {
     }
 
     // 3. Update the book record (only fill gaps, never overwrite supplier data)
+    // NOTE: books has no page_count column, so pageCount from Google Books
+    // is returned below for display but not persisted.
     await query(
       `UPDATE books SET
          description = COALESCE(NULLIF(description, ''), $1),
          cover_image_url = COALESCE(NULLIF(cover_image_url, ''), $2),
-         page_count = COALESCE(page_count, $3),
          updated_at = NOW()
-       WHERE isbn_13 = $4`,
-      [vol.description || null, coverUrl, vol.pageCount || null, isbn]
+       WHERE isbn_13 = $3`,
+      [vol.description || null, coverUrl, isbn]
     )
 
     return res.json({
