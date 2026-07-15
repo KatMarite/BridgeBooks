@@ -1,4 +1,17 @@
 """
+DEPRECATED — DO NOT RUN.
+
+Mislabeled duplicate of the Jonathan Ball pipeline (tags data as
+supplier_name='booksite' when it's really JBP's file format). Use
+backend/FTPS/Booksite/normalize_booksite.py for real Booksite data instead.
+"""
+import sys
+sys.exit(
+    "This script is disabled — it's a mislabeled duplicate of the Jonathan "
+    "Ball pipeline. Use backend/FTPS/Booksite/normalize_booksite.py instead."
+)
+
+"""
 normalize_booksite.py — Cleans and normalizes raw Booksite (Jonathan Ball) FTPS data.
 
 Input:  Pipe-delimited CSV from FTPS (no header row)

@@ -1,4 +1,21 @@
 """
+DEPRECATED — DO NOT RUN.
+
+This script is a mislabeled duplicate of the Jonathan Ball ingestion pipeline.
+It downloads Jonathan Ball's JBPStock.csv but tags the data as supplier_name
+='booksite', which would corrupt supplier_prices with JBP data mislabeled as
+Booksite. The real Booksite pipeline (different host, different file format —
+itemmast.zip, comma-delimited) lives in backend/FTPS/Booksite/. Use that
+instead, and use backend/FTPS/Jonathan Ball/ for real Jonathan Ball imports.
+"""
+import sys
+sys.exit(
+    "This script is disabled — it's a mislabeled duplicate of the Jonathan "
+    "Ball pipeline. Use backend/FTPS/Booksite/ftp_download.py for Booksite, "
+    "or backend/FTPS/Jonathan Ball/ftp_download.py for Jonathan Ball."
+)
+
+"""
 ftp_download.py — Downloads the Booksite stock file via FTPS.
 
 Connects to the Booksite (Jonathan Ball Publishers) FTPS server,
