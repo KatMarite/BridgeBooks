@@ -51,7 +51,7 @@ class IngestionLogger:
                 "DATABASE_URL",
                 "postgresql://postgres:admin123@localhost:5432/Bridge_dev"
             )
-            self._conn = psycopg2.connect(db_url)
+            self._conn = psycopg2.connect(db_url, sslmode="require")
         return self._conn
 
     def start(self):

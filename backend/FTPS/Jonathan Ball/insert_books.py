@@ -10,6 +10,7 @@ Uses ON CONFLICT to safely handle re-imports without duplicating data.
 
 import pandas as pd
 import psycopg2
+from psycopg2.extras import execute_values
 import os
 import sys
 from dotenv import load_dotenv
@@ -45,7 +46,7 @@ print(f"📖 Loaded {len(df)} rows from normalized CSV")
 # ----------------------------
 # CONNECT TO POSTGRESQL
 # ----------------------------
-conn = psycopg2.connect(DATABASE_URL)
+conn = psycopg2.connect(DATABASE_URL, sslmode="require")
 cur = conn.cursor()
 
 # ----------------------------
@@ -55,7 +56,7 @@ books_query = """
 INSERT INTO books (
     isbn_13, title, author, publisher, publication_date
 )
-VALUES (%s, %s, %s, %s, %s)
+VALUES %s
 ON CONFLICT (isbn_13) DO UPDATE SET
     title = EXCLUDED.title,
     author = EXCLUDED.author,
@@ -68,7 +69,7 @@ prices_query = """
 INSERT INTO supplier_prices (
     isbn_13, supplier_name, retail_price, in_stock, currency
 )
-VALUES (%s, %s, %s, %s, 'ZAR')
+VALUES %s
 ON CONFLICT (isbn_13, supplier_name) DO UPDATE SET
     retail_price = EXCLUDED.retail_price,
     in_stock = EXCLUDED.in_stock,
@@ -84,43 +85,93 @@ logger.start()
 
 books_upserted = 0
 prices_upserted = 0
+errors = 0
+BATCH_SIZE = 500
+row_num = 0
 
-for _, row in df.iterrows():
-    try:
-        pub_date = row.get("publication_date", None)
-        if pd.isna(pub_date) or pub_date == "":
-            pub_date = None
 
-        cur.execute(books_query, (
-            row["isbn_13"],
+def parse_row(row):
+    isbn = row["isbn_13"]
+    pub_date = row.get("publication_date", None)
+    if pd.isna(pub_date) or pub_date == "":
+        pub_date = None
+    return {
+        "isbn": isbn,
+        "books_row": (
+            isbn,
             row.get("title", "Unknown"),
             row.get("author", "Unknown"),
             row.get("publisher", None),
             pub_date,
-        ))
-        books_upserted += 1
-        logger.add_inserted()
-
-        cur.execute(prices_query, (
-            row["isbn_13"],
+        ),
+        "prices_row": (
+            isbn,
             row.get("supplier_name", "jonathanBall"),
             float(row.get("retail_price", 0)),
             bool(row.get("in_stock", False)),
-        ))
-        prices_upserted += 1
+            "ZAR",
+        ),
+    }
 
-    except Exception as e:
-        logger.add_error(f"ISBN {row.get('isbn_13', '?')}: {e}")
+
+def flush(batch):
+    global books_upserted, prices_upserted, errors
+    if not batch:
+        return
+    # Postgres refuses to let one multi-row statement update the same
+    # ON CONFLICT target twice (CardinalityViolation). Dedupe within the
+    # batch, keeping the last occurrence of each ISBN — otherwise any
+    # batch with a repeated ISBN falls back to the slow per-row path.
+    deduped = list({p["isbn"]: p for p in batch}.values())
+    try:
+        execute_values(cur, books_query, [p["books_row"] for p in deduped])
+        execute_values(cur, prices_query, [p["prices_row"] for p in deduped])
+        conn.commit()
+        books_upserted += len(deduped)
+        prices_upserted += len(deduped)
+        for _ in deduped:
+            logger.add_inserted()
+    except Exception:
+        # Still failed even after dedup (some other data issue) — roll
+        # back the whole batch and retry rows one at a time so we only
+        # lose the actual offending row(s).
         conn.rollback()
-        continue
-    finally:
+        for parsed in deduped:
+            try:
+                execute_values(cur, books_query, [parsed["books_row"]])
+                execute_values(cur, prices_query, [parsed["prices_row"]])
+                conn.commit()
+                books_upserted += 1
+                prices_upserted += 1
+                logger.add_inserted()
+            except Exception as row_err:
+                conn.rollback()
+                errors += 1
+                logger.add_error(f"ISBN {parsed['isbn']}: {row_err}")
+                if errors <= 10:
+                    print(f"  [ERROR] {parsed['isbn']}: {row_err}")
+    for _ in batch:
         logger.add_processed()
 
-conn.commit()
+
+batch = []
+for _, row in df.iterrows():
+    row_num += 1
+    batch.append(parse_row(row))
+
+    if len(batch) >= BATCH_SIZE:
+        flush(batch)
+        print(f"  ...{row_num:,} rows processed", end="\r")
+        batch = []
+
+flush(batch)  # final partial batch
+
 cur.close()
 conn.close()
 
-logger.finish(
-    status='success',
-    message=f"Jonathan Ball import: {books_upserted} books, {prices_upserted} prices upserted"
+summary = (
+    f"Jonathan Ball import complete: {books_upserted:,} books upserted, "
+    f"{prices_upserted:,} prices upserted, {errors:,} errors."
 )
+logger.finish(status='success', message=summary)
+print(f"\n{summary}")

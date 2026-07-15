@@ -39,3 +39,7 @@ backend/FTPS/**/normalized_output.csv
 # Email Ingestion pipeline — large data files
 backend/Email_Ingestion/**/downloads/
 backend/Email_Ingestion/**/normalized_output.csv
+
+# Generated ONIX export — regenerate with export_onix.py, don't commit
+# (this file was previously committed and had grown to 769MB)
+backend/onix_export.xml

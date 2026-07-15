@@ -38,6 +38,8 @@ Schema notes:
                                        -- default: 'ZA NA BW'
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import argparse
@@ -321,7 +323,7 @@ def main():
                         help="Output filename (default: onix_export.xml)")
     args = parser.parse_args()
 
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(DATABASE_URL, sslmode="require")
     conn.autocommit = True
 
     with conn.cursor() as cur:

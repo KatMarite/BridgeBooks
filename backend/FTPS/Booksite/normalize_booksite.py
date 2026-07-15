@@ -21,6 +21,8 @@ Usage:
     python3 normalize_booksite.py
 """
 
+from __future__ import annotations
+
 import csv
 import sys
 from pathlib import Path
