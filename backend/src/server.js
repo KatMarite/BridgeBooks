@@ -323,14 +323,17 @@ app.get('/api/dashboard/summary', async (req, res) => {
     try {
       const cutoff = getRangeCutoff(range)
 
+      // NOTE: ingestion_events has no records_updated column — the
+      // ingestion scripts only track total upserted rows (records_inserted),
+      // not a separate new-vs-updated split. metadataUpdates was removed
+      // rather than computed from data that doesn't exist.
       const summaryResult = await query(
         `SELECT
            COUNT(*)::int                                   AS "filesReceived",
            COALESCE(SUM(records_inserted), 0)::int         AS "newIsbnsAdded",
-           COALESCE(SUM(records_updated), 0)::int          AS "metadataUpdates",
-           MAX(completed_at)                               AS "lastUpdated"
+           MAX(finished_at)                                AS "lastUpdated"
          FROM ingestion_events
-         WHERE completed_at >= $1`,
+         WHERE finished_at >= $1`,
         [cutoff]
       )
 
@@ -346,7 +349,6 @@ app.get('/api/dashboard/summary', async (req, res) => {
         range,
         filesReceived: row.filesReceived || 0,
         newIsbnsAdded: row.newIsbnsAdded || 0,
-        metadataUpdates: row.metadataUpdates || 0,
         totalErrors: errResult.rows[0].count || 0,
         lastUpdated: row.lastUpdated || new Date().toISOString(),
       })
@@ -360,7 +362,6 @@ app.get('/api/dashboard/summary', async (req, res) => {
     range,
     filesReceived: 0,
     newIsbnsAdded: 0,
-    metadataUpdates: 0,
     totalErrors: 0,
     lastUpdated: new Date().toISOString(),
   })
@@ -380,15 +381,15 @@ app.get('/api/dashboard/activity', async (req, res) => {
       const result = await query(
         `SELECT
            id,
-           completed_at   AS timestamp,
+           finished_at    AS timestamp,
            supplier_name  AS supplier,
            file_name      AS "fileName",
            status,
            records_processed AS "recordsProcessed",
            message
          FROM ingestion_events
-         WHERE completed_at >= $1
-         ORDER BY completed_at DESC
+         WHERE finished_at >= $1
+         ORDER BY finished_at DESC
          LIMIT 50`,
         [cutoff]
       )
@@ -409,15 +410,18 @@ app.get('/api/dashboard/activity', async (req, res) => {
 app.get('/api/dashboard/errors', async (req, res) => {
   if (isDbConnected) {
     try {
+      // ingestion_errors only stores (id, event_id, error_message, created_at,
+      // resolved) — supplier/file come from the linked ingestion_events row.
       const result = await query(
         `SELECT
            e.id,
-           e.created_at   AS timestamp,
-           e.supplier_name AS supplier,
-           e.file_name     AS "fileName",
-           e.message,
+           e.created_at    AS timestamp,
+           ev.supplier_name AS supplier,
+           ev.file_name     AS "fileName",
+           e.error_message  AS message,
            e.resolved
          FROM ingestion_errors e
+         LEFT JOIN ingestion_events ev ON e.event_id = ev.id
          ORDER BY e.created_at DESC
          LIMIT 100`
       )
@@ -436,14 +440,20 @@ app.post('/api/dashboard/errors/:id/resolve', async (req, res) => {
   if (isDbConnected) {
     try {
       const result = await query(
-        'UPDATE ingestion_errors SET resolved = true WHERE id = $1 RETURNING *',
+        `WITH updated AS (
+           UPDATE ingestion_errors SET resolved = true WHERE id = $1 RETURNING *
+         )
+         SELECT u.id, u.created_at, u.resolved, u.error_message AS message,
+                ev.supplier_name AS supplier, ev.file_name AS "fileName"
+         FROM updated u
+         LEFT JOIN ingestion_events ev ON u.event_id = ev.id`,
         [req.params.id]
       )
       if (result.rowCount === 0) return res.status(404).json({ message: 'Error not found' })
       const row = result.rows[0]
       return res.json({
         success: true,
-        error: { id: String(row.id), timestamp: row.created_at, supplier: row.supplier_name, fileName: row.file_name, message: row.message, resolved: row.resolved },
+        error: { id: String(row.id), timestamp: row.created_at, supplier: row.supplier, fileName: row.fileName, message: row.message, resolved: row.resolved },
       })
     } catch (err) {
       console.error('Error resolving:', err)
@@ -936,17 +946,19 @@ app.get('/api/system/sync-logs', async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 100
     const source = req.query.source
     
-    let sql = `SELECT 
+    // NOTE: ingestion_events has no records_updated column (only
+    // records_processed/records_inserted are tracked), so updated_records
+    // was dropped rather than pulled from data that doesn't exist.
+    let sql = `SELECT
       id,
       supplier_name as source,
       file_name as filename,
       status,
       records_processed as processed_records,
-      records_updated as updated_records,
-      errors_count as error_records,
+      error_count as error_records,
       message as error_details,
       started_at,
-      completed_at as finished_at
+      finished_at
     FROM ingestion_events`
     const params = []
     
@@ -1321,15 +1333,17 @@ async function startServer() {
   // Attempt DB connection
   const dbIsAvailable = await connectDb()
   
-  if (dbIsAvailable) {
+  // Auto-seed is opt-in only (set AUTO_SEED=true in .env). The real
+  // production database now holds 377k+ real books from Booksite/Jonathan
+  // Ball/small publishers — seed.js's 20 mock books and fake dashboard
+  // events should never run against it by default. Use `npm run seed`
+  // manually against a fresh dev database instead.
+  if (dbIsAvailable && process.env.AUTO_SEED === 'true') {
     try {
-      console.log('🌱 Auto-seeding database...')
-      // We run the seed script directly here by importing and calling it
-      // but since it's a separate file we can just use child_process or do nothing here since package.json has 'npm run seed'.
-      // Wait, the user asked for auto-seed on startup. Let's do it by running the script.
+      console.log('🌱 AUTO_SEED=true — seeding database...')
       const { exec } = await import('child_process')
       await new Promise((resolve) => {
-        exec('node src/seed.js', (err, stdout, stderr) => {
+        exec('node --env-file=.env src/seed.js', { env: process.env }, (err, stdout, stderr) => {
           if (err) console.error('Auto-seed failed:', stderr)
           else console.log(stdout.trim())
           resolve()

@@ -15,12 +15,31 @@ import pg from 'pg'
 
 const { Pool } = pg
 
-const DATABASE_URL =
+const RAW_DATABASE_URL =
   process.env.DATABASE_URL ||
   'postgresql://postgres:admin123@localhost:5432/Bridge_dev'
 
+// pg-connection-string reads `sslmode=require` out of the URL itself and
+// treats it as an alias for 'verify-full' (full certificate chain
+// validation against Node's trust store) — which then overrides whatever
+// `ssl` option we pass to Pool below, and fails against Supabase's pooler
+// cert ("self-signed certificate in certificate chain"). Strip it from the
+// string so our explicit `ssl` option is the only thing that applies.
+function stripSslMode(url) {
+  const [base, query] = url.split('?')
+  if (!query) return url
+  const params = query.split('&').filter((p) => !p.startsWith('sslmode='))
+  return params.length ? `${base}?${params.join('&')}` : base
+}
+
+const DATABASE_URL = stripSslMode(RAW_DATABASE_URL)
+
 const pool = new Pool({
   connectionString: DATABASE_URL,
+  // Still encrypts the connection — just doesn't validate Supabase's
+  // certificate chain against Node's built-in CA list, same tradeoff
+  // psycopg2's sslmode="require" makes on the Python side of this codebase.
+  ssl: { rejectUnauthorized: false },
   // Keep the pool small for a dev/small-team backend
   max: 10,
   idleTimeoutMillis: 30_000,

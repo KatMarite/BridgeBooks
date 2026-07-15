@@ -112,12 +112,15 @@ async function seed() {
     for (const evt of EVENTS) {
       const completedAt = new Date(Date.now() - evt.hoursAgo * 60 * 60 * 1000)
       const startedAt = new Date(completedAt - 45 * 1000) // ~45 seconds earlier
+      // NOTE: ingestion_events has no records_updated column, and the
+      // error-count column is `error_count` (not errors_count) — matches
+      // the real live schema, not the older assumptions this script had.
       const evtRes = await client.query(
-        `INSERT INTO ingestion_events (supplier_name, status, file_name, records_processed, records_inserted, records_updated, errors_count, message, started_at, completed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO ingestion_events (supplier_name, status, file_name, records_processed, records_inserted, error_count, message, started_at, finished_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT DO NOTHING
          RETURNING id`,
-        [evt.supplier, evt.status, evt.file, evt.processed, evt.inserted, evt.updated, evt.errors, evt.message, startedAt, completedAt]
+        [evt.supplier, evt.status, evt.file, evt.processed, evt.inserted, evt.errors, evt.message, startedAt, completedAt]
       )
       if (evtRes.rowCount && evtRes.rowCount > 0) {
         eventsInserted++
@@ -134,16 +137,16 @@ async function seed() {
           ]
           for (let i = 0; i < Math.min(evt.errors, errorMessages.length); i++) {
             await client.query(
-              `INSERT INTO ingestion_errors (event_id, supplier_name, file_name, message, created_at)
-               VALUES ($1, $2, $3, $4, $5)`,
-              [eventId, evt.supplier, evt.file, `Row ${100 + i * 37}: ${errorMessages[i]}`, completedAt]
+              `INSERT INTO ingestion_errors (event_id, error_message, created_at)
+               VALUES ($1, $2, $3)`,
+              [eventId, `Row ${100 + i * 37}: ${errorMessages[i]}`, completedAt]
             )
           }
         } else if (evt.status === 'error') {
           await client.query(
-            `INSERT INTO ingestion_errors (event_id, supplier_name, file_name, message, created_at)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [eventId, evt.supplier, evt.file, evt.message, completedAt]
+            `INSERT INTO ingestion_errors (event_id, error_message, created_at)
+             VALUES ($1, $2, $3)`,
+            [eventId, evt.message, completedAt]
           )
         }
       }
